@@ -132,3 +132,9 @@ class MetricsReport(BaseModel):
     confusion: dict[str, int] = Field(default_factory=dict)
     threshold: float = 0.5
     notes: list[str] = Field(default_factory=list)
+    #: Per-group breakdown, for any body that audits subpopulations (fairness, segments,
+    #: operating regimes). Empty when the body has no meaningful grouping.
+    groups: dict[str, dict[str, float]] = Field(default_factory=dict)
+    #: How the grouping was defined. Required whenever ``groups`` is non-empty, so a
+    #: breakdown can never be reported without saying what it was sliced by.
+    group_basis: str = ""

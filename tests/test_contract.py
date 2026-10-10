@@ -7,6 +7,7 @@ These tests are the enforcement half of ``docs/ARCHITECTURE.md`` §1. Without th
 from __future__ import annotations
 
 import ast
+import importlib
 from pathlib import Path
 
 import pytest
@@ -34,9 +35,23 @@ def registry() -> ModuleRegistry:
 
 
 def test_discovery_finds_every_package(registry: ModuleRegistry) -> None:
-    """Every package under modules/ must export MODULE, or be reported as a load error."""
-    loaded_or_failed = set(registry.ids()) | set(getattr(registry, "load_errors", {}))
-    assert set(module_packages()) <= loaded_or_failed
+    """Every package under modules/ must be registered, or reported as a load error.
+
+    The registry keys on ``MODULE.id`` while load errors key on package name, so the two are
+    compared separately rather than unioned — a module whose id differs from its directory
+    (hyphens are not legal in Python identifiers) is legitimate and must not look like a miss.
+    """
+    failed = set(getattr(registry, "load_errors", {}))
+    registered_ids = set(registry.ids())
+    unaccounted = []
+    for pkg in module_packages():
+        if pkg in failed:
+            continue
+        mod = importlib.import_module(f"modules.{pkg}")
+        instance = getattr(mod, "MODULE", None)
+        if instance is None or instance.id not in registered_ids:
+            unaccounted.append(pkg)
+    assert not unaccounted, f"packages neither registered nor error-reported: {unaccounted}"
 
 
 def test_discovery_has_no_errors(registry: ModuleRegistry) -> None:

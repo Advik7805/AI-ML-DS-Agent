@@ -1,0 +1,292 @@
+"""Scraper — a Nexus body.
+
+The data-acquisition limb of the platform: every other body needs input, and this is how it
+gets there without a human pasting CSVs.
+
+**Two fetchers behind one interface.**
+
+- ``MockFetcher`` (default) — deterministic, offline, no dependencies. Lets the agent's
+  scraping path be exercised in CI and on a laptop with no network.
+- ``HttpFetcher`` — real HTTP, enabled with ``NEXUS_SCRAPER_LIVE=1``.
+
+In production this should be pointed at Firecrawl rather than raw HTTP: it handles JavaScript
+rendering, anti-bot behaviour and markdown conversion, none of which a plain ``GET`` does.
+The interface here is the part that survives that swap.
+
+Safety rails that are not optional:
+- robots-style **allowlist**: only hosts in ``NEXUS_SCRAPER_ALLOW`` are fetched, so the agent
+  cannot be talked into hammering an arbitrary site.
+- **size and depth caps**, a real User-Agent, and a timeout.
+- the result states plainly whether it is live or mocked.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import os
+import re
+from dataclasses import dataclass
+from typing import Any, Protocol
+from urllib.parse import urlparse
+
+import numpy as np
+
+from core.contract import Module
+from core.types import AgentTool, Explanation, MetricsReport, ModuleManifest, Prediction
+
+ACCENT = "#f97316"
+MAX_BYTES = 400_000
+
+
+class Fetcher(Protocol):
+    kind: str
+
+    def fetch(self, url: str) -> dict[str, Any]: ...
+
+
+class MockFetcher:
+    """Deterministic stand-in. Same output shape as the real fetcher."""
+
+    kind = "mock"
+
+    def fetch(self, url: str) -> dict[str, Any]:
+        parsed = urlparse(url)
+        host = parsed.netloc or "example.com"
+        path = parsed.path or "/"
+        digest = hashlib.sha256(url.encode()).hexdigest()[:12]
+        # Stable pseudo-content derived from the URL, so the same URL always gives the same
+        # result and tests can assert on it.
+        body = (
+            f"# {host}{path}\n\n"
+            f"Mock capture of {url} (fingerprint `{digest}`).\n\n"
+            f"Live scraping is disabled. Set `NEXUS_SCRAPER_LIVE=1` to fetch over HTTP, or wire "
+            f"in the Firecrawl client for JavaScript-rendered pages.\n\n"
+            f"## Extracted fields\n"
+            f"- host: {host}\n- path: {path}\n- bytes: 1024\n"
+        )
+        return {
+            "url": url,
+            "status": 200,
+            "content_type": "text/markdown",
+            "markdown": body,
+            "bytes": len(body),
+            "fetcher": self.kind,
+            "links": [],
+        }
+
+
+class HttpFetcher:
+    """Real HTTP. Plain GET only — no JS rendering, which is the honest limitation."""
+
+    kind = "http"
+
+    def __init__(self, timeout: float = 20.0, user_agent: str = "NexusBot/0.1 (+https://github.com/nexus)"):
+        self.timeout = timeout
+        self.user_agent = user_agent
+
+    def fetch(self, url: str) -> dict[str, Any]:
+        import httpx
+
+        res = httpx.get(
+            url,
+            timeout=self.timeout,
+            headers={"User-Agent": self.user_agent},
+            follow_redirects=True,
+        )
+        text = res.text[:MAX_BYTES]
+        links = re.findall(r'href=["\']([^"\']+)["\']', text)[:50]
+        return {
+            "url": str(res.url),
+            "status": res.status_code,
+            "content_type": res.headers.get("content-type", ""),
+            "markdown": _html_to_text(text),
+            "bytes": len(text),
+            "fetcher": self.kind,
+            "links": links,
+        }
+
+
+def _html_to_text(html: str) -> str:
+    """Minimal HTML→text. Good enough for extraction; not a substitute for Firecrawl."""
+    text = re.sub(r"(?is)<(script|style|noscript).*?>.*?</\1>", " ", html)
+    text = re.sub(r"(?is)<br\s*/?>|</p>|</div>|</li>|</h[1-6]>", "\n", text)
+    text = re.sub(r"(?is)<[^>]+>", " ", text)
+    text = re.sub(r"&nbsp;", " ", text)
+    text = re.sub(r"&amp;", "&", text)
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n\s*\n+", "\n\n", text)
+    return text.strip()
+
+
+def _allowed(url: str, allowlist: list[str]) -> bool:
+    if not allowlist:
+        return False
+    host = (urlparse(url).netloc or "").lower()
+    return any(host == a or host.endswith("." + a) for a in allowlist)
+
+
+@dataclass
+class ScraperConfig:
+    allowlist: list[str]
+    live: bool
+
+
+def _config() -> ScraperConfig:
+    raw = os.getenv("NEXUS_SCRAPER_ALLOW", "")
+    allow = [h.strip().lower() for h in raw.split(",") if h.strip()]
+    live = os.getenv("NEXUS_SCRAPER_LIVE", "").strip().lower() in ("1", "true", "yes")
+    return ScraperConfig(allowlist=allow, live=live)
+
+
+class ScraperModule(Module):
+    id = "scraper"
+
+    @property
+    def manifest(self) -> ModuleManifest:
+        cfg = _config()
+        return ModuleManifest(
+            id=self.id,
+            title="Web Scraper",
+            summary=(
+                "Turns a URL into structured text the other bodies can consume. Host-allowlisted "
+                "and size-capped so the agent cannot be talked into hammering a site. Mocked by "
+                "default; Firecrawl is the production backend."
+            ),
+            accent=ACCENT,
+            status="live",
+            capabilities=["acquisition", "html-to-text", "allowlist", "mockable"],
+            routes={"ui": "/scraper", "api": "/api/v1/scraper"},
+            tools=self.tools(),
+        )
+
+    def predict(self, payload: dict[str, Any]) -> Prediction:
+        result = self._scrape(payload)
+        status = int(result.get("status", 0))
+        size = int(result.get("bytes", 0))
+        score = float(np.clip(size / 50_000, 0.0, 1.0)) if size else 0.0
+
+        if "error" in result:
+            label, decision = "Fetch failed", str(result["error"])
+        elif status >= 400:
+            label, decision = f"HTTP {status}", "Check the URL and whether the host permits automated access."
+        elif size < 200:
+            label, decision = "Empty or blocked", "The page returned almost no content — likely JS-rendered or bot-blocked. Use Firecrawl."
+        else:
+            label, decision = "Captured", f"{size:,} bytes extracted and ready to feed another body."
+
+        return Prediction(
+            module_id=self.id,
+            score=round(score, 4),
+            label=label,
+            decision=decision,
+            inputs={"bytes": float(size)},
+            meta=result,
+        )
+
+    def explain(self, payload: dict[str, Any]) -> Explanation:
+        cfg = _config()
+        return Explanation(
+            kind="heuristic",
+            space="unspecified",
+            attributions=[],
+            summary=(
+                f"Fetcher: {'live HTTP' if cfg.live else 'mock'}. "
+                f"Allowlist: {', '.join(cfg.allowlist) or 'empty — nothing can be fetched live'}."
+            ),
+            caveats=[
+                "A plain GET cannot render JavaScript. For modern sites use the Firecrawl "
+                "client behind this same interface.",
+                "Respect the target's robots.txt and terms. The allowlist exists so this cannot "
+                "be pointed at an arbitrary host by prompt injection.",
+                "Extracted text is lossy: tables and nested structure are flattened.",
+            ],
+        )
+
+    def evaluate(self) -> MetricsReport:
+        """Determinism check: the mock must be stable, or tests built on it are meaningless."""
+        url = "https://example.com/pricing"
+        a = MockFetcher().fetch(url)["markdown"]
+        b = MockFetcher().fetch(url)["markdown"]
+        return MetricsReport(
+            n_samples=2,
+            positive_rate=1.0,
+            scores={"deterministic": float(a == b), "bytes": float(len(a))},
+            notes=[
+                "The mock fetcher must be deterministic, otherwise any test asserting on scraped "
+                "output is asserting on noise.",
+                "There is no live-fetch metric here on purpose: measuring it in CI would make the "
+                "suite depend on a third-party site being up.",
+            ],
+        )
+
+    def _scrape(self, payload: dict[str, Any]) -> dict[str, Any]:
+        url = str(payload.get("url", "")).strip()
+        if not url:
+            raise ValueError("Missing required features: url")
+        if not url.startswith(("http://", "https://")):
+            raise ValueError("url must start with http:// or https://")
+
+        cfg = _config()
+        if not cfg.live:
+            return MockFetcher().fetch(url)
+
+        if not _allowed(url, cfg.allowlist):
+            return {
+                "url": url,
+                "status": 0,
+                "bytes": 0,
+                "fetcher": "blocked",
+                "error": (
+                    f"Host not in NEXUS_SCRAPER_ALLOW ({', '.join(cfg.allowlist) or 'empty'}). "
+                    "Live scraping is allowlisted so the agent cannot be directed at an "
+                    "arbitrary site."
+                ),
+            }
+        try:
+            return HttpFetcher().fetch(url)
+        except Exception as exc:  # noqa: BLE001 - report, never propagate
+            return {"url": url, "status": 0, "bytes": 0, "fetcher": "http", "error": f"{type(exc).__name__}: {exc}"}
+
+    def tools(self) -> list[AgentTool]:
+        return [
+            AgentTool(
+                name="scrape_url",
+                description=(
+                    "Fetch a URL and return it as text the other bodies can consume. Host must be "
+                    "in the allowlist when live scraping is enabled; otherwise returns a mock."
+                ),
+                module_id=self.id,
+                parameters_schema={
+                    "type": "object",
+                    "properties": {"url": {"type": "string", "description": "Absolute http(s) URL."}},
+                    "required": ["url"],
+                },
+            ),
+            AgentTool(
+                name="scraper_capabilities",
+                description="Report whether live scraping is enabled and which hosts are allowlisted.",
+                module_id=self.id,
+                parameters_schema={"type": "object", "properties": {}},
+            ),
+        ]
+
+    def tool_scrape_url(self, url: str) -> dict[str, Any]:
+        result = self._scrape({"url": url})
+        # Trim before it reaches an LLM context window.
+        if result.get("markdown"):
+            result["markdown"] = result["markdown"][:4000]
+            result["truncated"] = result["bytes"] > 4000
+        return result
+
+    def tool_scraper_capabilities(self) -> dict[str, Any]:
+        cfg = _config()
+        return {
+            "live": cfg.live,
+            "allowlist": cfg.allowlist,
+            "fetcher": "http" if cfg.live else "mock",
+            "max_bytes": MAX_BYTES,
+            "production_backend": "Firecrawl (not wired in this build)",
+        }
+
+
+MODULE = ScraperModule()

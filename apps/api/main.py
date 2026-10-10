@@ -11,19 +11,24 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+import json
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from core.agent.graph import HubAgent
+from core.agent.providers import Message, get_provider
 from core.contract import ModuleRegistry
 from core.types import Explanation, MetricsReport, ModuleManifest, Prediction
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    """Discover every body under ``modules/`` once, at startup."""
+    """Discover every body under ``modules/`` once, at startup, then build the hub agent."""
+    global agent
     registry.discover("modules")
+    agent = HubAgent(registry, get_provider())
     yield
 
 
@@ -49,6 +54,10 @@ app.add_middleware(
 
 #: Populated by the lifespan hook. Kept module-level so tests can swap it out.
 registry = ModuleRegistry()
+
+#: The hub agent. Provider is resolved from env at startup; falls back to the mock so the hub
+#: is a working product even with no API key configured.
+agent: HubAgent | None = None
 
 
 class PredictRequest(BaseModel):
@@ -173,3 +182,78 @@ def call_tool(tool_name: str, body: ToolCallRequest) -> ToolCallResponse:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
     return ToolCallResponse(tool=tool_name, module_id=owner.id, result=result)
+
+
+# --- hub agent ---------------------------------------------------------------
+
+
+class ChatRequest(BaseModel):
+    message: str
+    #: Prior turns, oldest first. Kept client-supplied so the API stays stateless on a free
+    #: tier, where a sleeping container would otherwise lose every conversation.
+    history: list[dict[str, str]] = Field(default_factory=list)
+
+
+class ChatResponse(BaseModel):
+    answer: str
+    provider: str
+    tools_used: list[str]
+    trace: list[dict[str, Any]]
+    error: str | None = None
+
+
+def _coerce_history(raw: list[dict[str, str]]) -> list[Message]:
+    out: list[Message] = []
+    for turn in raw[-12:]:  # bound the context; free tiers have small limits
+        role = turn.get("role")
+        if role in ("user", "assistant") and turn.get("content"):
+            out.append(Message(role=role, content=turn["content"]))  # type: ignore[arg-type]
+    return out
+
+
+@app.get("/api/v1/agent")
+def agent_info() -> dict[str, Any]:
+    if agent is None:
+        raise HTTPException(status_code=503, detail="Agent not initialised.")
+    return {
+        "provider": agent.provider.name,
+        "max_iterations": agent.max_iterations,
+        "tools": [t.name for t in agent.registry.all_tools()],
+        "note": (
+            "Running on the deterministic mock provider. Set NEXUS_LLM=groq or "
+            "NEXUS_LLM=gemini with the matching API key for real reasoning."
+            if agent.provider.name == "mock"
+            else None
+        ),
+    }
+
+
+@app.post("/api/v1/agent/chat", response_model=ChatResponse)
+def chat(body: ChatRequest) -> ChatResponse:
+    if agent is None:
+        raise HTTPException(status_code=503, detail="Agent not initialised.")
+    if not body.message.strip():
+        raise HTTPException(status_code=422, detail="message must not be empty.")
+    result = agent.run(body.message, history=_coerce_history(body.history))
+    return ChatResponse(
+        answer=result["answer"],
+        provider=result["provider"],
+        tools_used=result["tools_used"],
+        trace=result["trace"],
+        error=result["error"],
+    )
+
+
+@app.post("/api/v1/agent/chat/stream")
+async def chat_stream(body: ChatRequest):
+    """Server-sent events: one event per node so the UI can show the agent working."""
+    from sse_starlette.sse import EventSourceResponse
+
+    if agent is None:
+        raise HTTPException(status_code=503, detail="Agent not initialised.")
+
+    async def events():
+        for update in agent.stream(body.message, history=_coerce_history(body.history)):
+            yield {"event": update.get("node", "update"), "data": json.dumps(update, default=str)}
+
+    return EventSourceResponse(events())

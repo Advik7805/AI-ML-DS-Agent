@@ -17,5 +17,14 @@ scikit-learn>=1.6      # FrozenEstimator; prefit calibration removed
 imbalanced-learn>=0.12 # SMOTE
 shap>=0.46             # TreeSHAP explanations
 
+# --- agent orchestration ---
+# `langgraph.graph` is the only LangGraph import (core/agent/graph.py). langchain-core arrives
+# as its transitive dependency, so it is deliberately not pinned here.
+langgraph>=1.0
+sse-starlette>=2.1     # SSE streaming for POST /api/v1/agent/chat/stream
+
+# --- fairness ---
+fairlearn>=0.11        # group metric audit in modules/xai_health
+
 # --- tests ---
 pytest>=8.3

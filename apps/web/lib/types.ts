@@ -67,6 +67,10 @@ export interface MetricsReport {
   confusion: Record<string, number>;
   threshold: number;
   notes: string[];
+  /** Per-subpopulation breakdown (fairness, segments, operating regimes). Empty if none. */
+  groups: Record<string, Record<string, number>>;
+  /** How `groups` was sliced. Never empty when `groups` is populated. */
+  group_basis: string;
 }
 
 export interface HealthResponse {

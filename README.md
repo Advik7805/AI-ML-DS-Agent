@@ -18,27 +18,29 @@ explanations render through the same components.
 
 ## Status
 
-**Phase 0 shipped and running.** The contract, the gateway, the hub and the first body are
-built, tested and verified end-to-end.
+**All seven bodies built, discovered and agent-reachable.** Every body owns its own Next.js root
+layout, so each route is a genuinely separate document — its own `<html>`, theme colour, metadata
+and identity — while connecting to the hub through one shared contract.
 
-| Piece | State |
-|---|---|
-| Module contract + registry (`core/`) | 12 conformance rules, enforced in CI |
-| Generic API gateway (`apps/api/`) | zero module-specific code |
-| Churn body (`modules/churn/`) | live, on the real 3,333-row telecom dataset |
-| Hub with 3D module graph (`apps/web/app/(hub)/`) | live |
-| Churn storefront (`apps/web/app/(churn)/`) | live |
-| 5 further bodies | roadmap — see §Bodies |
+| Body | Route | Data | Headline result |
+|---|---|---|---|
+| Churn & retention | `/churn` | real telecom, 834 held-out | PR-AUC **0.677** vs 0.145 → **4.67× lift** |
+| Fraud & anomaly | `/fraud` | synthetic, 5,000 held-out | PR-AUC **0.608** vs 0.010 → **59.6× lift**, FPR 0.0002 |
+| Predictive maintenance | `/maintenance` | synthetic CMAPSS-compatible | R² **0.840**, MAE 11.15 cycles (GroupKFold by engine) |
+| Dynamic pricing | `/pricing` | synthetic point-of-sale | 22/24 SKUs with identified elasticity |
+| Explainable diagnostics | `/diagnostics` | real Pima diabetes | ROC-AUC 0.690; fairness gap **0.208** flagged |
+| Knowledge RAG | `/rag` | 6-doc policy corpus | hit@1 **0.833**, 25 passages |
+| Web scraper | `/scraper` | mock by default | host-allowlisted, size-capped |
 
-**50 tests passing.** Held-out results on the real dataset, read from
-`GET /api/v1/modules/churn/metrics` rather than a notebook:
+**97 tests passing** (`python3 -m pytest -q`), across `tests/test_contract.py` and
+`tests/test_bodies.py`. **17 tools** register into one registry, names globally unique.
 
-| Metric | Value |
-|---|---|
-| PR-AUC | **0.677** vs 0.145 baseline → **4.67× lift** |
-| ROC-AUC | 0.856 |
-| Threshold | 0.41, chosen by F1 on a fold reserved for it |
-| Test confusion | tn 674 · fp 39 · fn 47 · tp 74 |
+Results are read from the live gateway, not a notebook — e.g.
+`GET /api/v1/modules/churn/metrics` and `GET /api/v1/agent/tools`.
+
+The agent runs on a deterministic mock provider by default. Set `NEXUS_LLM=groq` or
+`NEXUS_LLM=gemini` with the matching key for real reasoning; a missing key falls back to mock
+rather than failing.
 
 ---
 

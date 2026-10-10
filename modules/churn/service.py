@@ -97,7 +97,8 @@ class ChurnModule(Module):
             raise ValueError(str(exc)) from None
 
         score = float(bundle.model.predict_proba(X)[0, 1])
-        factors = self._top_factors(payload, k=5)
+        explanation = self._safe_explain(payload)
+        factors = explanation.attributions[:5] if explanation else []
         label, decision = _band(score, bundle.threshold)
 
         return Prediction(
@@ -107,6 +108,7 @@ class ChurnModule(Module):
             decision=decision,
             inputs={k: float(payload[k]) for k in FEATURES if payload.get(k) is not None},
             factors=factors,
+            explanation=explanation,
             meta={
                 "threshold": bundle.threshold,
                 "base_rate": round(bundle.base_rate, 4),
@@ -234,11 +236,12 @@ class ChurnModule(Module):
 
     # --- helpers ---------------------------------------------------------------
 
-    def _top_factors(self, payload: dict[str, Any], k: int = 5) -> list[FeatureAttribution]:
+    def _safe_explain(self, payload: dict[str, Any]) -> Explanation | None:
+        """Explanations are best-effort; scoring is not. Never let XAI break a prediction."""
         try:
-            return self.explain(payload).attributions[:k]
-        except Exception:  # noqa: BLE001 - explanations are best-effort, scoring is not
-            return []
+            return self.explain(payload)
+        except Exception:  # noqa: BLE001
+            return None
 
 
 #: The singleton the registry discovers.

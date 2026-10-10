@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { AgentChat } from "@/components/hub/AgentChat";
 import { ModuleGraph } from "@/components/hub/ModuleGraph";
 import { getModules } from "@/lib/api";
 import type { ModuleManifest } from "@/lib/types";
@@ -117,12 +118,8 @@ export default async function HubPage() {
             <Stat label="Shared contract" value="1" />
           </div>
 
-          <div className="glass mt-8 overflow-x-auto rounded-xl p-5 font-mono text-[12px] leading-relaxed text-ink-dim">
-            <span className="text-ink-faint"># the agent's whole view of the platform</span>
-            <br />
-            GET /api/v1/agent/tools <span className="text-ink-faint">→ every tool, JSON Schema, ready to bind</span>
-            <br />
-            POST /api/v1/agent/tools/&#123;name&#125; <span className="text-ink-faint">→ routed to the owning body</span>
+          <div className="mt-8">
+            <AgentChat />
           </div>
         </div>
       </section>

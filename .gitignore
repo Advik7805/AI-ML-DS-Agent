@@ -15,6 +15,7 @@ data/raw/
 
 # Node
 node_modules/
+*.tsbuildinfo
 .next/
 out/
 dist/
