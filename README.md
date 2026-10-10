@@ -32,7 +32,7 @@ and identity — while connecting to the hub through one shared contract.
 | Knowledge RAG | `/rag` | 6-doc policy corpus | hit@1 **0.833**, 25 passages |
 | Web scraper | `/scraper` | mock by default | host-allowlisted, size-capped |
 
-**97 tests passing** (`python3 -m pytest -q`), across `tests/test_contract.py` and
+**117 tests passing** (`python3 -m pytest -q`), across `tests/test_contract.py` and
 `tests/test_bodies.py`. **17 tools** register into one registry, names globally unique.
 
 Results are read from the live gateway, not a notebook — e.g.
@@ -110,7 +110,7 @@ deploy/          API Dockerfile
 ```bash
 pip install -r requirements.txt
 bash data/fetch.sh                    # real dataset; optional — synthetic fallback works
-python -m pytest                      # 50 tests
+python -m pytest                      # 117 tests
 python -m modules.churn.train         # held-out metrics
 uvicorn apps.api.main:app --reload    # http://localhost:8000/docs
 ```
