@@ -3,6 +3,8 @@ import Link from "next/link";
 
 import "@/app/globals.css";
 
+import { StorefrontField } from "./StorefrontField";
+
 /**
  * Shared storefront chrome, parameterised by body.
  *
@@ -39,12 +41,7 @@ export function Storefront({ p, children }: { p: StorefrontProps; children: Reac
   return (
     <html lang="en">
       <body className="min-h-screen bg-[#fbfaf7] text-[#1c1917] antialiased">
-        <div
-          className="pointer-events-none fixed inset-0 -z-10"
-          style={{
-            background: `radial-gradient(60rem 30rem at 100% -10%, ${p.accent}22, transparent 60%), radial-gradient(40rem 25rem at -10% 25%, ${p.accent}12, transparent 60%)`,
-          }}
-        />
+        <StorefrontField accent={p.accent} />
 
         <header className="sticky top-0 z-30 border-b border-[#e7e0d5] bg-[#fbfaf7]/85 backdrop-blur">
           <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-3.5">
