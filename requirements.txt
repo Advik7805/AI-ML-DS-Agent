@@ -1,0 +1,21 @@
+# Nexus — Python platform dependencies.
+#
+# Versions are the ones the test suite was actually run against (see CI). sklearn >= 1.6
+# matters: CalibratedClassifierCV(cv="prefit") was removed there and replaced by
+# FrozenEstimator, which modules/churn/train.py uses.
+
+# --- API gateway ---
+fastapi>=0.115
+uvicorn[standard]>=0.32
+pydantic>=2.9
+httpx>=0.27            # FastAPI TestClient
+
+# --- data / ML ---
+numpy>=1.26,<3
+pandas>=2.2
+scikit-learn>=1.6      # FrozenEstimator; prefit calibration removed
+imbalanced-learn>=0.12 # SMOTE
+shap>=0.46             # TreeSHAP explanations
+
+# --- tests ---
+pytest>=8.3

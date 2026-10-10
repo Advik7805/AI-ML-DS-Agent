@@ -1,0 +1,92 @@
+@import "tailwindcss";
+
+/*
+  Nexus design tokens. Two visual identities share this file on purpose: the hub is a dark,
+  volumetric console; each body (storefront) overrides the accent and surface so it reads as
+  its own site. Tokens live in one place so a body can never drift off-system.
+*/
+@theme {
+  --color-void: #05060a;
+  --color-void-2: #0a0c14;
+  --color-void-3: #11141f;
+  --color-ink: #e8eaf2;
+  --color-ink-dim: #9aa1b8;
+  --color-ink-faint: #5b6382;
+  --color-line: #1d2233;
+
+  --color-hub: #7c5cff;
+  --color-churn: #f59e0b;
+
+  --font-display: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--color-void);
+  color: var(--color-ink);
+  font-family: var(--font-display);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Ambient field behind the hub. Pure CSS so it costs no frame budget, unlike a video. */
+.ambient {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(60rem 40rem at 15% -10%, rgba(124, 92, 255, 0.22), transparent 60%),
+    radial-gradient(50rem 35rem at 85% 10%, rgba(56, 189, 248, 0.14), transparent 60%),
+    radial-gradient(45rem 30rem at 50% 110%, rgba(245, 158, 11, 0.1), transparent 60%);
+}
+
+.grid-floor {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 40%, transparent 100%);
+}
+
+.glass {
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.015));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(14px);
+}
+
+/* Honour the user's motion preference — this is a WebGL-heavy app. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+::selection {
+  background: color-mix(in oklab, var(--color-hub) 45%, transparent);
+}
+
+/* Scrollbar: unobtrusive, dark. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-void);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-line);
+  border-radius: 99px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2a3149;
+}

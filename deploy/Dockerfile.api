@@ -1,0 +1,26 @@
+# API image. Slim on purpose: free tiers cap RAM, and torch/transformers are not needed for
+# the churn body. Bodies that do need them should get their own image rather than making
+# everyone pay.
+FROM python:3.11-slim
+
+WORKDIR /app
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY core/ core/
+COPY modules/ modules/
+COPY apps/ apps/
+COPY data/fetch.sh data/
+COPY pyproject.toml .
+
+# Real dataset, baked in. Keeps the container honest about what it was trained on and avoids
+# a network dependency at cold start.
+RUN bash data/fetch.sh || echo "dataset fetch skipped; synthetic fallback will be used"
+
+EXPOSE 8000
+CMD ["uvicorn", "apps.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

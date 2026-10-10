@@ -1,0 +1,16 @@
+# Blueprint for the API on Render's free tier.
+#
+# Free-tier realities this design works around:
+#   - sleeps after 15 min idle  -> the frontend renders with a "waking up" notice, never blank
+#   - ephemeral filesystem      -> nothing persistent lives on disk; artifacts are rebuildable
+#   - 512 MB RAM                -> no torch/transformers in this image
+services:
+  - type: web
+    name: nexus-api
+    runtime: docker
+    dockerfilePath: ./deploy/Dockerfile.api
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"

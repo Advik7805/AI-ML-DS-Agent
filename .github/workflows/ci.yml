@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "arena/**"]
+  pull_request:
+
+jobs:
+  platform:
+    name: Python platform (contract + churn body + gateway)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # data/raw/ is git-ignored, so CI fetches the real dataset. Without it the suite would
+      # fall back to synthetic data and silently stop testing the real pipeline.
+      - name: Fetch datasets
+        run: bash data/fetch.sh
+
+      - name: Verify the real dataset is what the tests expect
+        run: |
+          python - <<'PY'
+          from modules.churn.data import load_telco
+          df, source = load_telco()
+          assert source == "real", f"expected real data, got {source}"
+          assert len(df) == 3333, len(df)
+          print(f"OK: {source} data, {len(df)} rows, {df['churn'].mean():.3%} positive")
+          PY
+
+      - name: Test
+        run: python -m pytest -v
+
+      - name: Train and report held-out metrics
+        run: python -m modules.churn.train
+
+  web:
+    name: Next.js hub + storefronts
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install
+        run: npm install --no-audit --no-fund
+
+      # The build type-checks every route. The API is not running here, so pages must
+      # degrade gracefully — that path is exactly what a sleeping free-tier backend produces.
+      - name: Build
+        run: npx next build
