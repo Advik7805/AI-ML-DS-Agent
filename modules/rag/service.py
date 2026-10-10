@@ -18,6 +18,30 @@ from core.types import AgentTool, Explanation, MetricsReport, ModuleManifest, Pr
 
 from .retriever import Retriever
 
+
+def corpus_status(r: "Retriever") -> dict[str, Any]:
+    """Provenance of the loaded corpus, including any external-source failure.
+
+    Surfaced rather than logged: a corpus silently missing documents is worse than a
+    visible warning, because the answers still look confident.
+    """
+    from core.integrations.supabase import status as supabase_status
+
+    st = supabase_status()
+    out = {
+        "external_backend": st["backend"],
+        "external_live": st["live"],
+        "n_external_passages": getattr(r, "_n_external", 0),
+    }
+    err = getattr(r, "_external_error", None)
+    if err:
+        out["external_error"] = err
+        out["warning"] = (
+            f"External corpus failed to load ({err}); answering from the in-repo "
+            "documents only."
+        )
+    return out
+
 ACCENT = "#38bdf8"
 
 #: Words too common to count as evidence of a topical match.
@@ -256,7 +280,15 @@ class RagModule(Module):
 
     def tool_list_knowledge_sources(self) -> dict[str, Any]:
         r = self.retriever
-        return {"n_documents": len(r.sources), "n_passages": r.size, "sources": r.sources}
+        out: dict[str, Any] = {
+            "n_documents": len(r.sources),
+            "n_passages": r.size,
+            "sources": r.sources,
+            # Where the corpus came from. Without this a Supabase outage looks identical to a
+            # knowledge base that genuinely has six documents.
+            "corpus": corpus_status(r),
+        }
+        return out
 
 
 MODULE = RagModule()

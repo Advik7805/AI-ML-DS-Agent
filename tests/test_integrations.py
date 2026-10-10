@@ -278,3 +278,132 @@ def test_capabilities_reports_all_three_acquisition_paths(registry) -> None:
     assert caps["tavily"]["live"] is False
     assert caps["firecrawl"]["live"] is False
     assert "one-time" in caps["firecrawl"]["free_tier"].lower()
+
+
+# --- Supabase: optional extra corpus ------------------------------------------
+
+
+def test_supabase_source_is_off_by_default() -> None:
+    from core.integrations import supabase
+
+    supabase.reset_source()
+    src = supabase.get_source()
+    assert isinstance(src, supabase.EmptySource)
+    assert src.fetch_documents() == []
+
+
+def test_supabase_source_contributes_nothing_when_unconfigured() -> None:
+    """The in-repo corpus must stand alone; this is the whole point of it being additive."""
+    from core.integrations import supabase
+
+    supabase.reset_source()
+    assert supabase.status()["live"] is False
+    assert "in-repo" in supabase.status()["warning"]
+
+
+def test_supabase_selects_the_live_source_when_fully_configured(monkeypatch) -> None:
+    from core.integrations import supabase
+
+    monkeypatch.setenv("SUPABASE_URL", "https://xyz.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "sb-secret")
+    monkeypatch.setenv("NEXUS_SUPABASE_LIVE", "1")
+    supabase.reset_source()
+    assert isinstance(supabase.get_source(), supabase.SupabaseSource)
+    supabase.reset_source()
+
+
+def test_supabase_source_requires_both_url_and_key() -> None:
+    from core.integrations.supabase import SupabaseSource
+
+    with pytest.raises(cfg.NotConfigured):
+        SupabaseSource("", "key")
+    with pytest.raises(cfg.NotConfigured):
+        SupabaseSource("https://xyz.supabase.co", "")
+
+
+def test_supabase_source_sends_both_auth_headers(monkeypatch) -> None:
+    """PostgREST rejects a request missing either header, with an unhelpful error."""
+    from core.integrations.supabase import SupabaseSource
+
+    capture: dict = {}
+
+    class FakeResp:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [{"source": "new-policy", "heading": "H", "body": "Some policy text."}]
+
+    def fake_get(url, **kwargs):
+        capture["url"] = url
+        capture["headers"] = kwargs.get("headers")
+        capture["params"] = kwargs.get("params")
+        return FakeResp()
+
+    import httpx
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+    docs = SupabaseSource("https://xyz.supabase.co", "sb-secret").fetch_documents()
+
+    assert docs == [{"source": "new-policy", "heading": "H", "body": "Some policy text."}]
+    assert capture["headers"]["apikey"] == "sb-secret"
+    assert capture["headers"]["Authorization"] == "Bearer sb-secret"
+    # Only active rows, only the fields needed.
+    assert capture["params"]["active"] == "eq.true"
+    assert capture["params"]["select"] == "source,heading,body"
+
+
+def test_supabase_source_drops_empty_rows(monkeypatch) -> None:
+    """A row with no text would become a passage that can never match but still inflates the
+    corpus size — worse than no row at all."""
+    from core.integrations.supabase import SupabaseSource
+
+    class FakeResp:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [
+                {"source": "good", "heading": "H", "body": "Real content here."},
+                {"source": "empty-body", "heading": "H", "body": "   "},
+                {"source": "", "heading": "H", "body": "No slug."},
+            ]
+
+    import httpx
+
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: FakeResp())
+    docs = SupabaseSource("https://xyz.supabase.co", "k").fetch_documents()
+    assert [d["source"] for d in docs] == ["good"]
+
+
+def test_a_supabase_outage_does_not_empty_the_corpus(monkeypatch, registry) -> None:
+    """The central guarantee: the in-repo corpus survives a database failure."""
+    from core.integrations import supabase
+
+    class Broken:
+        backend = "supabase"
+
+        def fetch_documents(self):
+            raise RuntimeError("connection refused")
+
+    monkeypatch.setattr(supabase, "get_source", lambda: Broken())
+    monkeypatch.setattr("modules.rag.retriever.get_source", lambda: Broken(), raising=False)
+
+    from modules.rag.retriever import Retriever
+
+    r = Retriever().build()
+    assert r.size >= 12, "the in-repo corpus must still load"
+    assert r._n_external == 0
+    assert r._external_error and "connection refused" in r._external_error
+
+
+def test_corpus_provenance_is_reported(registry) -> None:
+    """Without this, a Supabase outage looks identical to a corpus that genuinely has 6 docs."""
+    out = registry.get("rag").call_tool("list_knowledge_sources", {})
+    assert "corpus" in out
+    assert out["corpus"]["external_backend"] in ("none", "supabase")
+    assert out["n_documents"] >= 6, "the in-repo corpus must always be present"

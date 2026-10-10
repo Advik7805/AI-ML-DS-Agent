@@ -91,7 +91,7 @@ panel and `GET /api/v1/integrations` show what is live and what is still mocked.
 | **Tavily** | `TAVILY_API_KEY`, `NEXUS_TAVILY_LIVE=1` | **1,000 credits/month, students free** | `web_search`, `extract_url` |
 | **Firecrawl** | `FIRECRAWL_API_KEY`, `NEXUS_FIRECRAWL_LIVE=1` | 500 credits **one-time** | `render_url` (JS rendering) |
 | **Upstash** | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, `NEXUS_UPSTASH_LIVE=1` | 10k commands/day | shared rate limiting |
-| **Supabase** | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `NEXUS_SUPABASE_LIVE=1` | 500 MB + pgvector | persistent vectors |
+| **Supabase** | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `NEXUS_SUPABASE_LIVE=1` | 500 MB | extra knowledge-base documents, no redeploy |
 
 Suggested order, best value first:
 
@@ -104,8 +104,12 @@ Suggested order, best value first:
    per-process, so one crawler can exhaust the API's request budget.
 4. **Firecrawl.** Only if a page genuinely needs a browser. Tavily's extract covers most cases
    on a friendlier allowance, and Firecrawl's 500 credits never refill.
-5. **Supabase.** Skip until the corpus outgrows in-memory TF-IDF. At 25 passages it is a
-   network round trip that buys nothing.
+5. **Supabase.** Only if you want to add knowledge-base documents without redeploying. It is a
+   plain-text document table, *not* a vector store — at 25 passages TF-IDF already retrieves
+   correctly and pgvector would add a round trip and an embedding dependency for nothing. Create
+   the table with the schema at the top of `core/integrations/supabase.py`; the in-repo six
+   documents always load regardless, and a database outage degrades to them rather than to an
+   empty knowledge base.
 
 Full list with commentary: [`.env.example`](../.env.example).
 

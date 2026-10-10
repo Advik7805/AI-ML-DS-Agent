@@ -55,6 +55,8 @@ services:
         sync: false
       - key: NEXUS_SUPABASE_LIVE
         value: "0"
+      - key: NEXUS_SUPABASE_TABLE
+        value: knowledge_documents
 
       - key: UPSTASH_REDIS_REST_URL
         sync: false

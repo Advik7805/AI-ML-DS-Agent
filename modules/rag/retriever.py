@@ -82,6 +82,11 @@ class Retriever:
         self._passages: list[tuple[str, str, str]] = []
         self._vectorizer: TfidfVectorizer | None = None
         self._matrix = None
+        #: Passages that came from the external source rather than the in-repo markdown.
+        self._n_external = 0
+        #: Set when the external source was configured but failed. Surfaced rather than
+        #: swallowed: a corpus silently missing documents is worse than a visible warning.
+        self._external_error: str | None = None
 
     def build(self) -> "Retriever":
         docs = sorted(self.corpus_dir.glob("*.md"))
@@ -91,6 +96,24 @@ class Retriever:
         for doc in docs:
             for head, text in _chunk(doc.read_text(encoding="utf-8")):
                 self._passages.append((doc.stem, head, text))
+
+        n_local = len(self._passages)
+
+        # Optional second source: rows in Supabase, merged with the in-repo documents. The
+        # in-repo corpus is already loaded at this point, so a failure here degrades to "the
+        # documents I shipped with" rather than to an empty knowledge base. That asymmetry is
+        # the reason this is additive and wrapped, not a replacement for the files.
+        try:
+            from core.integrations.supabase import get_source
+
+            extra = get_source().fetch_documents()
+        except Exception as exc:  # noqa: BLE001 - a DB outage must not empty the corpus
+            self._external_error = f"{type(exc).__name__}: {exc}"
+            extra = []
+        for row in extra:
+            for head, text in _chunk(f"## {row['heading']}\n\n{row['body']}" if row.get("heading") else row["body"]):
+                self._passages.append((row["source"], head, text))
+        self._n_external = len(self._passages) - n_local
 
         # sublinear_tf damps the advantage of long passages; ngram_range picks up phrases like
         # "customer service" that unigrams alone would split.

@@ -32,7 +32,7 @@ and identity — while connecting to the hub through one shared contract.
 | Knowledge RAG | `/rag` | 6-doc policy corpus | hit@1 **0.833**, 25 passages |
 | Web scraper | `/scraper` | mock by default | host-allowlisted, size-capped |
 
-**168 tests passing** (`python3 -m pytest -q`), across six suites: contract conformance,
+**176 tests passing** (`python3 -m pytest -q`), across six suites: contract conformance,
 per-body model quality, the gateway over HTTP, integrations, the LLM providers, and the churn
 body. **20 tools** register into one registry, names globally unique.
 
@@ -117,7 +117,7 @@ deploy/          API Dockerfile
 ```bash
 pip install -r requirements.txt
 bash data/fetch.sh                    # real dataset; optional — synthetic fallback works
-python -m pytest                      # 168 tests
+python -m pytest                      # 176 tests
 python -m modules.churn.train         # held-out metrics
 uvicorn apps.api.main:app --reload    # http://localhost:8000/docs
 ```
@@ -135,14 +135,15 @@ backend, which is what makes it work behind a preview host with no CORS.
 
 ## Bodies
 
-| Body | State | Stack |
+| Body | State | Stack as actually built |
 |---|---|---|
-| **Churn & Retention** | **live** | GBM + SMOTE, sigmoid calibration, TreeSHAP |
-| Knowledge RAG | planned | LlamaIndex, pgvector on Supabase |
-| Fraud & Anomaly | planned | Redis Streams, SMOTE, live alerts |
-| Predictive Maintenance | planned | PyTorch LSTM, sensor telemetry |
-| Explainable Diagnostics | planned | PyTorch + SHAP + Fairlearn bias audits |
-| Dynamic Pricing | planned | H3 spatial indexing, demand allocation |
+| **Churn & Retention** | live | Gradient boosting + SMOTE, sigmoid calibration over a `FrozenEstimator`, TreeSHAP |
+| **Fraud & Anomaly** | live | GBM + SMOTE, Platt-calibrated Isolation Forest on the decision function |
+| **Predictive Maintenance** | live | Gradient boosting over sensor windows, GroupKFold by engine, per-band MAE |
+| **Explainable Diagnostics** | live | Gradient boosting on real Pima data, SHAP + Fairlearn disparity audit |
+| **Knowledge RAG** | live | TF-IDF over a chunked markdown corpus; optional extra documents from Supabase |
+| **Dynamic Pricing** | live | Log-log demand elasticity with standard errors, per-SKU opportunity ranking |
+| **Data Acquisition** | live | Tavily search + extract, Firecrawl JS rendering, SSRF-guarded fetch |
 | Scraper | planned | Firecrawl API, zero self-hosting |
 
 ---
@@ -189,7 +190,7 @@ show what a deploy still needs. Copy [`.env.example`](.env.example) for the full
 |---|---|---|---|
 | Tavily | scraper, rag | 1,000 credits/mo, no card | ✅ `web_search`, `extract_url` |
 | Groq / Gemini | agent | free tiers | ✅ `NEXUS_LLM=groq\|gemini` |
-| Supabase | rag | 500 MB + pgvector | key read, client pending |
+| Supabase | rag | 500 MB, free forever | ✅ `knowledge_documents` — extra corpus, no redeploy |
 | Upstash | api, scraper | 10k commands/day | ✅ rate limiting on every metered route |
 | Firecrawl | scraper | 500 credits one-time | ✅ `render_url` (JS-rendering) |
 
