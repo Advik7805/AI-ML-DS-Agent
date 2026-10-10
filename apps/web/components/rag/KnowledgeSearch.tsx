@@ -31,10 +31,21 @@ interface SearchResult {
   citation: string;
 }
 
+/** Provenance of the loaded corpus. Mirrors `corpus_status()` in modules/rag/service.py. */
+interface CorpusStatus {
+  external_backend: string;
+  external_live: boolean;
+  n_external_passages: number;
+  external_error?: string;
+  warning?: string;
+}
+
 interface Sources {
   n_documents: number;
   n_passages: number;
   sources: string[];
+  /** Present once the API reports it. Optional so an older backend does not break the board. */
+  corpus?: CorpusStatus;
 }
 
 const ACCENT = "#0284c7";
@@ -206,10 +217,38 @@ export function KnowledgeSearch() {
             <ul className="mt-3 space-y-1 border-t border-[#f5f5f4] pt-3">
               {sources.sources.map((s) => (
                 <li key={s} className="font-mono text-[11px] text-[#78716c]">
-                  {s}.md
+                  {s}
+                  {/* Only in-repo documents are files. Appending .md to a Supabase row would
+                      invent a filename that does not exist. */}
+                  {!sources.corpus?.external_live && ".md"}
                 </li>
               ))}
             </ul>
+
+            {sources.corpus && (
+              <div className="mt-3 border-t border-[#f5f5f4] pt-3">
+                <div className="flex items-center gap-1.5">
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${
+                      sources.corpus.external_live ? "bg-[#0284c7]" : "bg-[#d6d3d1]"
+                    }`}
+                  />
+                  <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#a8a29e]">
+                    {sources.corpus.external_live
+                      ? `live · ${sources.corpus.n_external_passages} extra passages`
+                      : "in-repo corpus only"}
+                  </span>
+                </div>
+                {/* An external corpus that failed to load must be visible. Without this a
+                    Supabase outage is indistinguishable from a knowledge base that genuinely
+                    has six documents — and the answers stay confident either way. */}
+                {sources.corpus.warning && (
+                  <p className="mt-2 rounded-md bg-[#fef2f2] p-2 text-[10.5px] leading-relaxed text-[#b91c1c]">
+                    {sources.corpus.warning}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         )}
 
