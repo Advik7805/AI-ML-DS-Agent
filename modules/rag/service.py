@@ -38,6 +38,47 @@ def _matched_term_count(query: str, text: str) -> int:
     return sum(1 for t in terms if t in hay)
 
 
+def _grounding(query: str, hits: list[Any]) -> tuple[str, str, int]:
+    """Return ``(label, decision, matched_terms)`` for a set of retrieval hits.
+
+    One implementation, called by both ``predict`` and the ``search_knowledge`` tool, so the
+    agent and the storefront can never disagree about whether an answer was grounded. This
+    used to live only inside ``predict``, which meant the tool handed the agent raw scores
+    with no verdict attached and it summarised them as a JSON dump.
+
+    The discriminator is the count of substantive query terms found in the top passage, not
+    the cosine. An earlier version floored the cosine at 0.25, but on a 25-passage corpus
+    TF-IDF tops out near 0.22 even for obviously-relevant questions — the floor rejected
+    every real query and labelled the whole body useless. Measured:
+
+        "What discount can an agent approve?"        0.183   2 terms   relevant
+        "What is the refund window?"                 0.175   1 term    relevant
+        "airspeed velocity of an unladen swallow"    0.175   1 term    irrelevant
+
+    Cosine cannot separate those last two. Term count can, so a single shared token is called
+    weak even though it occasionally demotes a real question that the corpus answers at rank
+    two. Being conservative about grounding is the cheaper error here.
+    """
+    top = hits[0].score if hits else 0.0
+    matched_terms = _matched_term_count(query, hits[0].heading + " " + hits[0].text) if hits else 0
+
+    if not hits or matched_terms == 0:
+        label, decision = "No grounding", (
+            "The corpus has nothing on this. Say so rather than answering from memory."
+        )
+    elif matched_terms < 2:
+        label, decision = "Weak grounding", (
+            "The match rests on a single shared word — treat any answer as unverified and "
+            "ask a clarifying question."
+        )
+    else:
+        label, decision = "Well grounded", (
+            f"Answer from `{hits[0].source}.md` → {hits[0].heading} and cite it."
+        )
+    return label, decision, matched_terms
+
+
+
 class RagModule(Module):
     id = "rag"
 
@@ -86,20 +127,7 @@ class RagModule(Module):
         # A single shared word is not grounding. "What is the airspeed velocity of an unladen
         # swallow" matches the fraud protocol on the word "velocity" alone and scored 0.175,
         # which is why the floor sits at 0.25 and the matched-term count is reported.
-        matched_terms = _matched_term_count(query, hits[0].text) if hits else 0
-        if not hits:
-            label, decision = "No grounding", (
-                "The corpus has nothing on this. Say so rather than answering from memory."
-            )
-        elif top < 0.25 or matched_terms < 2:
-            label, decision = "Weak grounding", (
-                "Best match is weak or rests on a single shared word — treat any answer as "
-                "unverified and ask a clarifying question."
-            )
-        else:
-            label, decision = "Well grounded", (
-                f"Answer from `{hits[0].source}.md` → {hits[0].heading} and cite it."
-            )
+        label, decision, matched_terms = _grounding(query, hits)
 
         return Prediction(
             module_id=self.id,
@@ -210,9 +238,15 @@ class RagModule(Module):
 
     def tool_search_knowledge(self, query: str, k: int = 5) -> dict[str, Any]:
         hits = self.retriever.search(query, k=k)
+        label, decision, matched_terms = _grounding(query, hits)
         return {
             "query": query,
             "n_results": len(hits),
+            # The verdict travels with the passages. Without it the agent receives bare cosine
+            # scores and has no way to tell a grounded answer from a coincidental one.
+            "grounding": label,
+            "matched_terms": matched_terms,
+            "decision": decision,
             "results": [
                 {"source": h.source, "heading": h.heading, "score": h.score, "snippet": h.snippet}
                 for h in hits

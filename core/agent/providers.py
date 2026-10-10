@@ -90,13 +90,19 @@ _TOOL_HINTS: list[tuple[str, str]] = [
     (r"(?=[\s\S]*\b(fraud\w*|transactions?)\b)(?=[\s\S]*\b(streams?|feeds?|live|right now|currently happening)\b)",
      "summarise_fraud_stream"),
     (r"\b(churn\w*|retention|cancell?\w*|attrit\w*|customers?)\b", "score_customer_churn"),
-    (r"\b(search\w*|knowledge|polic(?:y|ies)|refunds?|sla\b|documents?|what does|approv\w*|discount|playbook|privacy)\b",
+    # `list_knowledge_sources` must precede `search_knowledge`: the search pattern matches the
+    # bare word "knowledge", so "list the knowledge sources" was being answered by *searching*
+    # for that phrase, finding nothing, and telling the user the corpus was empty. A question
+    # about the corpus is not a question to the corpus.
+    (r"(?=[\s\S]*\b(list\w*|show|what'?s|how many|which|catalog\w*)\b)"
+     r"(?=[\s\S]*\b(sources?|corpus|documents?|indexed)\b)", "list_knowledge_sources"),
+    (r"\b(sources?|corpus|what.{0,12}indexed)\b", "list_knowledge_sources"),
+    (r"\b(search\w*|knowledge|polic(?:y|ies)|refunds?|sla\b|what does|approv\w*|discount|playbook|privacy)\b",
      "search_knowledge"),
     (r"\b(scrape\w*|crawl\w*|fetch|urls?|websites?|competitor\w*|pages?)\b", "scrape_url"),
     (r"\b(metrics?|model cards?|pr-?auc|roc(?:-auc)?|thresholds?|evaluat\w*|how (?:good|well))\b",
      "get_churn_model_metrics"),
     (r"\b(fraud\w*|transactions?|suspicious|flag\w*)\b", "score_transaction"),
-    (r"\b(sources?|corpus|what.{0,12}indexed|documents?)\b", "list_knowledge_sources"),
     (r"\b(capabilit\w*|what can you|allowlist|live scraping)\b", "scraper_capabilities"),
 ]
 
@@ -569,6 +575,65 @@ def _summarise(tool_output: str) -> str:
                 f"{(data['worst_served_fnr'] or 0)*100:.1f}%; gap across groups "
                 f"{(data['fnr_gap'] or 0)*100:.1f} points.\n"
                 f"Verdict: {data['verdict']}\n\n{data['metric_rationale']}"
+            )
+
+        if "results" in data and "citation" in data:
+            rows = data["results"]
+            if not rows:
+                return (
+                    "Nothing in the knowledge base matches that. "
+                    "I am not going to answer from memory."
+                )
+            grounding = data.get("grounding", "Unknown grounding")
+            head = f"**{grounding}** ({data.get('matched_terms', 0)} substantive terms matched)"
+            if grounding == "Weak grounding":
+                head += " — treat the answer as unverified and ask a clarifying question."
+            elif grounding == "No grounding":
+                return f"**No grounding.** {data.get('decision', '')}"
+            lines = [head, ""]
+            for r in rows[:4]:
+                lines.append(f"- `{r['source']}.md` → **{r['heading']}** ({r['score']:.2f})")
+                lines.append(f"  {r['snippet'][:240]}")
+            return "\n".join(lines)
+
+        if "n_documents" in data and "sources" in data:
+            return (
+                f"The knowledge base holds {data['n_documents']} documents across "
+                f"{data['n_passages']} passages: " + ", ".join(f"`{s}`" for s in data["sources"]) + "."
+            )
+
+        if "top" in data and "n_skus" in data:
+            rows = data["top"]
+            if not rows:
+                return "No SKU has an identified elasticity, so there is nothing to optimise."
+            lines = [
+                f"Of {data['n_skus']} SKUs, {data['n_skus'] - data.get('n_not_identified', 0)} have an "
+                f"identified price elasticity. Biggest revenue opportunities:"
+            ]
+            for s in rows[:5]:
+                lines.append(
+                    f"- `{s['sku']}`: elasticity **{s['elasticity']:.2f}**, "
+                    f"price to ${s['recommended_price']:,.2f} "
+                    f"(+{s['estimated_revenue_uplift'] * 100:.1f}% revenue, r² {s['r2']:.2f})"
+                )
+            if data.get("n_not_identified"):
+                lines.append(
+                    f"\n{data['n_not_identified']} SKU(s) have no identified elasticity "
+                    f"({', '.join(data['not_identified'][:4])}) — {data.get('note', '')}"
+                )
+            return "\n".join(lines)
+
+        if "fetcher" in data and "allowlist" in data:
+            allow = data["allowlist"] or []
+            return (
+                f"Scraper runs in **{'live' if data['live'] else 'mock'}** mode via "
+                f"`{data['fetcher']}`, capped at {int(data['max_bytes']):,} bytes.\n"
+                + (
+                    f"Host allowlist: {', '.join(allow)}."
+                    if allow
+                    else "No hosts are allowlisted, so live fetching is blocked for every URL."
+                )
+                + f"\nProduction backend: {data.get('production_backend', 'n/a')}."
             )
 
         if "markdown" in data or "content" in data:

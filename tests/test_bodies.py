@@ -67,6 +67,40 @@ def test_rag_does_not_ground_on_a_single_shared_word(registry) -> None:
     assert pred.meta["matched_terms"] < 2
 
 
+def test_rag_grounds_a_relevant_question(registry) -> None:
+    """Regression guard: a cosine floor must not come back.
+
+    An earlier version rejected anything below 0.25. On this 25-passage corpus TF-IDF tops out
+    near 0.22 even for obviously-relevant questions, so the floor labelled every real query
+    weak and made the body look broken. The discriminator is substantive term count, not the
+    absolute cosine.
+    """
+    rag = registry.get("rag")
+    pred = rag.predict({"query": "What discount can an agent approve?"})
+    assert pred.label == "Well grounded", f"got '{pred.label}' at score {pred.score}"
+    assert pred.meta["matched_terms"] >= 2
+    assert pred.score < 0.25, "this corpus does not produce high cosines; do not re-add a floor"
+
+
+def test_rag_tool_and_predict_agree_on_grounding(registry) -> None:
+    """The agent and the storefront must never disagree about whether an answer was grounded.
+
+    The verdict used to live only inside ``predict``, so the tool handed the agent bare cosine
+    scores with no judgement attached.
+    """
+    rag = registry.get("rag")
+    for query in (
+        "What discount can an agent approve?",
+        "what is the airspeed velocity of an unladen swallow",
+        "xyzzy quantum flux capacitor",
+    ):
+        pred = rag.predict({"query": query, "k": 5})
+        res = rag.call_tool("search_knowledge", {"query": query, "k": 5})
+        assert res["grounding"] == pred.label, query
+        assert res["matched_terms"] == pred.meta["matched_terms"], query
+        assert res["decision"], "a verdict with no decision text is useless to the agent"
+
+
 def test_rag_evaluate_reports_retrieval_quality(registry) -> None:
     m = registry.get("rag").evaluate()
     assert m.scores["corpus_documents"] >= 6
@@ -364,3 +398,66 @@ def test_agent_survives_a_tool_that_raises(registry) -> None:
 
     result = HubAgent(registry, MockProvider()).run("Optimise the price for SKU-999")
     assert result["answer"], "the agent should still answer after a tool error"
+
+
+def test_every_tool_result_gets_summarised(registry) -> None:
+    """No tool may fall through to the raw-JSON catch-all.
+
+    `_summarise` is a chain of shape checks, so a new body silently gets the fallback and the
+    user is shown a wall of JSON. This drives *every* registered tool with schema-filled
+    arguments and asserts each output is turned into prose — so adding a body without a
+    summariser branch fails here rather than in production.
+    """
+    import json
+
+    from core.agent.providers import MockProvider, _summarise
+
+    for tool in registry.all_tools():
+        args = MockProvider._args_for(tool.name, "example query about the data", tool)
+        try:
+            out = registry.dispatch(tool.name, args)
+        except Exception as exc:  # a body that raises is covered elsewhere
+            continue
+        summary = _summarise(json.dumps(out, default=str))
+        assert not summary.startswith("Tool returned:"), (
+            f"{tool.name} has no summariser branch and leaked raw JSON"
+        )
+        assert "```json" not in summary, f"{tool.name} leaked serialised tool output"
+        assert len(summary.strip()) > 20, f"{tool.name} produced an empty summary"
+
+
+ROUTING_PROBES = [
+    ("List the knowledge sources", "list_knowledge_sources"),
+    ("What documents are in the corpus?", "list_knowledge_sources"),
+    ("Search the knowledge base for the refund window", "search_knowledge"),
+    ("What discount can an agent approve?", "search_knowledge"),
+    ("What are the churn model metrics?", "get_churn_model_metrics"),
+    ("Rank the top 5 customers most likely to churn", "rank_at_risk_customers"),
+    ("How good is the fraud model?", "get_fraud_model_metrics"),
+    ("Score this transaction for fraud", "score_transaction"),
+    ("What's happening on the fraud feed right now?", "summarise_fraud_stream"),
+    ("Which engines need maintenance first?", "rank_engines_by_urgency"),
+    ("Predict the remaining useful life", "predict_rul"),
+    ("Audit the diabetes model for fairness", "audit_model_fairness"),
+    ("Which SKUs have the biggest pricing opportunity", "list_skus_by_opportunity"),
+    ("Optimise the price for SKU-007", "optimise_price"),
+    ("Scrape https://example.com", "scrape_url"),
+    ("What are your scraping capabilities?", "scraper_capabilities"),
+    ("Assess this patient diabetes risk", "assess_diabetes_risk"),
+]
+
+
+@pytest.mark.parametrize("question,want", ROUTING_PROBES)
+def test_agent_routes_each_question_to_the_right_tool(registry, question, want) -> None:
+    """Intent routing, pinned.
+
+    Two failure modes this guards, both of which shipped once already:
+      * a body-scoped pattern placed after a generic one ("how good is the fraud model" used
+        to resolve to the churn metrics tool);
+      * `a[\\s\\S]*b` assuming word order, which fails on reordered phrasings.
+    """
+    from core.agent.providers import _pick_tool
+
+    available = {t.name for t in registry.all_tools()}
+    got = _pick_tool(question, available)
+    assert got == want, f"{question!r} routed to {got!r}, expected {want!r}"
