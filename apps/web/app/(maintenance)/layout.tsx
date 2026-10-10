@@ -12,7 +12,10 @@ const P: StorefrontProps = {
   title: "Predictive Maintenance",
   tagline: "Know which engine fails next, and how many cycles you have to act.",
   accent: "#22d3ee",
-  sections: [{ href: "#model", label: "Model" }, { href: "#console", label: "Console" }],
+  sections: [
+    { href: "#board", label: "Fleet queue" },
+    { href: "#console", label: "Console" },
+  ],
 };
 
 export const metadata: Metadata = storefrontMetadata(P);

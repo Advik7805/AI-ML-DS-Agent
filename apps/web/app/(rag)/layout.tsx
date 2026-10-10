@@ -12,7 +12,10 @@ const P: StorefrontProps = {
   title: "Knowledge RAG",
   tagline: "Answers grounded in the corpus, with the source attached to every claim.",
   accent: "#38bdf8",
-  sections: [{ href: "#model", label: "Model" }, { href: "#console", label: "Console" }],
+  sections: [
+    { href: "#board", label: "Search" },
+    { href: "#console", label: "Console" },
+  ],
 };
 
 export const metadata: Metadata = storefrontMetadata(P);

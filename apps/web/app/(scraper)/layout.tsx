@@ -12,7 +12,10 @@ const P: StorefrontProps = {
   title: "Web Scraper",
   tagline: "Turn any page into data the other bodies can consume.",
   accent: "#f97316",
-  sections: [{ href: "#model", label: "Model" }, { href: "#console", label: "Console" }],
+  sections: [
+    { href: "#board", label: "Acquisition" },
+    { href: "#console", label: "Console" },
+  ],
 };
 
 export const metadata: Metadata = storefrontMetadata(P);

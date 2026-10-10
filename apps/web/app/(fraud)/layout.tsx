@@ -12,7 +12,10 @@ const P: StorefrontProps = {
   title: "Fraud & Anomaly",
   tagline: "Score every transaction before it settles — and catch the fraud you have never seen.",
   accent: "#f43f5e",
-  sections: [{ href: "#model", label: "Model" }, { href: "#console", label: "Console" }],
+  sections: [
+    { href: "#board", label: "Live monitor" },
+    { href: "#console", label: "Console" },
+  ],
 };
 
 export const metadata: Metadata = storefrontMetadata(P);

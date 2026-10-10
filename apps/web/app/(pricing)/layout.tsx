@@ -12,7 +12,10 @@ const P: StorefrontProps = {
   title: "Dynamic Pricing",
   tagline: "Price from measured elasticity — never from an extrapolated guess.",
   accent: "#34d399",
-  sections: [{ href: "#model", label: "Model" }, { href: "#console", label: "Console" }],
+  sections: [
+    { href: "#board", label: "Opportunities" },
+    { href: "#console", label: "Console" },
+  ],
 };
 
 export const metadata: Metadata = storefrontMetadata(P);

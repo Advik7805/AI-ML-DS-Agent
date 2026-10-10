@@ -12,7 +12,10 @@ const P: StorefrontProps = {
   title: "Explainable Diagnostics",
   tagline: "Predict the risk, explain the risk, and audit who the model fails.",
   accent: "#a78bfa",
-  sections: [{ href: "#model", label: "Model" }, { href: "#console", label: "Console" }],
+  sections: [
+    { href: "#board", label: "Fairness audit" },
+    { href: "#console", label: "Console" },
+  ],
 };
 
 export const metadata: Metadata = storefrontMetadata(P);
