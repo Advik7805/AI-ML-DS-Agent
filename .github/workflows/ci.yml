@@ -7,7 +7,7 @@ on:
 
 jobs:
   platform:
-    name: Python platform (contract + churn body + gateway)
+    name: Python platform (contract + 7 bodies + agent + gateway)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,7 +22,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # data/raw/ is git-ignored, so CI fetches the real dataset. Without it the suite would
+      # data/raw/ is git-ignored, so CI fetches the real datasets. Without them the suite would
       # fall back to synthetic data and silently stop testing the real pipeline.
       - name: Fetch datasets
         run: bash data/fetch.sh
@@ -35,6 +35,23 @@ jobs:
           assert source == "real", f"expected real data, got {source}"
           assert len(df) == 3333, len(df)
           print(f"OK: {source} data, {len(df)} rows, {df['churn'].mean():.3%} positive")
+          PY
+
+      # A body that fails to import shows up in load_errors and is otherwise easy to miss: the
+      # gateway still boots and serves the other six. Fail the build instead.
+      - name: Verify every body is discovered
+        run: |
+          python - <<'PY'
+          from core.contract import ModuleRegistry
+          reg = ModuleRegistry().discover("modules")
+          assert not reg.load_errors, f"bodies failed to load: {reg.load_errors}"
+          ids = sorted(reg.ids())
+          expected = ["churn", "fraud", "maintenance", "pricing", "rag", "scraper", "xai_health"]
+          assert ids == expected, f"expected {expected}, got {ids}"
+          tools = reg.all_tools()
+          names = [t.name for t in tools]
+          assert len(names) == len(set(names)), "tool names must be globally unique"
+          print(f"OK: {len(ids)} bodies, {len(tools)} tools, names unique, no load errors")
           PY
 
       - name: Test
