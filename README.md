@@ -89,16 +89,22 @@ Two rules keep it honest, both enforced in CI:
 ## Layout
 
 ```
-core/            the contract, shared types, module registry
+core/
+  types.py       Prediction · Explanation · MetricsReport · ModuleManifest — one shape for all
+  contract.py    the Module ABC and the registry that discovers bodies
+  agent/         LangGraph plan-act loop; mock/groq/gemini providers
+  integrations/  env-gated external services, each with an honest mock fallback
 modules/
-  churn/         ← a body: data.py, train.py, service.py, tests. Self-contained.
+  churn/         ← a body: data.py, train.py, service.py. Self-contained.
+  fraud/ maintenance/ pricing/ rag/ scraper/ xai_health/
 apps/
-  api/           FastAPI gateway. Generic — knows nothing about churn.
-  web/           Next.js: (hub)/ and (churn)/ each own a root layout
-data/fetch.sh    pulls the real datasets; git-ignored so the repo stays light
-tests/           contract conformance, model quality, gateway over HTTP
+  api/           FastAPI gateway. Generic — knows nothing about any one body.
+  web/           Next.js: (hub)/ plus one root layout per body
+data/fetch.sh    pulls the real datasets; refuses Git LFS pointers
+tests/           contract conformance, per-body quality, integrations, gateway over HTTP
 docs/            RESEARCH · ARCHITECTURE · BUILD-NOTES
 deploy/          API Dockerfile
+.env.example     every variable the platform understands, with its free-tier terms
 ```
 
 ---
@@ -110,7 +116,7 @@ deploy/          API Dockerfile
 ```bash
 pip install -r requirements.txt
 bash data/fetch.sh                    # real dataset; optional — synthetic fallback works
-python -m pytest                      # 117 tests
+python -m pytest                      # 130 tests
 python -m modules.churn.train         # held-out metrics
 uvicorn apps.api.main:app --reload    # http://localhost:8000/docs
 ```
@@ -145,12 +151,47 @@ backend, which is what makes it work behind a preview host with no CORS.
 | Component | Target | Constraint designed around |
 |---|---|---|
 | Frontend | Vercel Hobby | — |
-| API | Render free | sleeps after 15 min → the UI degrades to a notice, never a blank page |
+| API | Render free | sleeps after 15 min, ~60 s cold start → keep-alive cron + a "waking up" UI, never a blank page |
 | API image | `deploy/Dockerfile.api` | 512 MB RAM → no torch in this image |
-| DB + vectors | Supabase free | ephemeral container disks are why vectors live in Postgres |
-| Cache / streams | Upstash Redis free | real pub/sub without Kafka's RAM bill |
-| LLM | Groq / Gemini free tiers | provider-swappable behind LangChain |
+| DB + vectors | Supabase free | Render's free Postgres **expires after 30 days**, so nothing durable lives there |
+| Cache / rate limits | Upstash Redis free | 10,000 commands/day is enough to stop one crawler exhausting the API |
+| Web search / extraction | Tavily free | 1,000 credits/month, no card, students free |
+| LLM | Groq / Gemini free tiers | provider-swappable behind one interface |
 | CI | GitHub Actions | public repo, unlimited minutes |
+
+**Why Render.** Checked in 2026: Railway removed its free tier in 2023 (now a one-time $5 trial
+credit) and Fly.io ended free allowances for new accounts in 2024. Render is the only one of the
+three with an ongoing free tier — 750 instance-hours/month, no card. Its cold start is the price,
+and [`.github/workflows/keep-alive.yml`](.github/workflows/keep-alive.yml) pings `/health` every
+10 minutes to stay inside the 15-minute idle window at zero cost.
+
+---
+
+## Optional integrations
+
+Nothing here is required. With an empty environment the platform runs end to end on real and
+generated data, and every external service degrades to a deterministic mock **that labels
+itself** — in the API payload (`backend: "mock"`) and in the UI. An agent that cannot tell
+simulated retrieval from real retrieval will confidently cite things that never happened.
+
+Two rules, both enforced in code rather than convention:
+
+1. **A key alone never enables a metered service.** Each also needs its `*_LIVE=1` flag, so a key
+   pasted in for a local experiment cannot make a demo billable.
+2. **Missing config is not an error.** `enabled` is a property the UI reads, so a storefront
+   renders "connect Tavily to go live" instead of throwing.
+
+`GET /api/v1/integrations` reports all of it — env var *names*, never values — so the frontend can
+show what a deploy still needs. Copy [`.env.example`](.env.example) for the full list.
+
+| Service | Used by | Free tier | Wired? |
+|---|---|---|---|
+| Tavily | scraper, rag | 1,000 credits/mo, no card | ✅ `web_search`, `extract_url` |
+| Groq / Gemini | agent | free tiers | ✅ `NEXUS_LLM=groq\|gemini` |
+| Supabase | rag | 500 MB + pgvector | key read, client pending |
+| Upstash | api, scraper | 10k commands/day | key read, client pending |
+| Firecrawl | scraper | 500 credits one-time | key read, client pending |
+
 
 ---
 
