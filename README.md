@@ -32,8 +32,9 @@ and identity — while connecting to the hub through one shared contract.
 | Knowledge RAG | `/rag` | 6-doc policy corpus | hit@1 **0.833**, 25 passages |
 | Web scraper | `/scraper` | mock by default | host-allowlisted, size-capped |
 
-**117 tests passing** (`python3 -m pytest -q`), across `tests/test_contract.py` and
-`tests/test_bodies.py`. **20 tools** register into one registry, names globally unique.
+**168 tests passing** (`python3 -m pytest -q`), across six suites: contract conformance,
+per-body model quality, the gateway over HTTP, integrations, the LLM providers, and the churn
+body. **20 tools** register into one registry, names globally unique.
 
 Results are read from the live gateway, not a notebook — e.g.
 `GET /api/v1/modules/churn/metrics` and `GET /api/v1/agent/tools`.
