@@ -111,6 +111,14 @@ Suggested order, best value first:
    documents always load regardless, and a database outage degrades to them rather than to an
    empty knowledge base.
 
+**Optional storefront backdrop video.** Set `BACKDROP_VIDEO_URL` to a hosted file and every
+storefront layers it beneath the 3D field, tinted to that body's accent. It is unset by default
+on purpose: a background video is 5–30 MB, and committing one means every clone and every deploy
+carries it. Use a CDN — Cloudflare R2's free tier is 10 GB storage and 10 GB egress, which covers
+it. Only `http(s)` URLs are accepted; a `javascript:` URI or a filesystem path is ignored and the
+procedural field renders alone. The variable is read server-side, so it never enters the client
+bundle.
+
 Full list with commentary: [`.env.example`](../.env.example).
 
 ---

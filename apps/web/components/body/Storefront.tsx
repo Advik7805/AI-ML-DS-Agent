@@ -3,6 +3,7 @@ import Link from "next/link";
 
 import "@/app/globals.css";
 
+import { BackdropVideo } from "./BackdropVideo";
 import { StorefrontField } from "./StorefrontField";
 
 /**
@@ -41,6 +42,9 @@ export function Storefront({ p, children }: { p: StorefrontProps; children: Reac
   return (
     <html lang="en">
       <body className="min-h-screen bg-[#fbfaf7] text-[#1c1917] antialiased">
+        {/* Video sits under the field: the procedural points stay legible over footage, and
+            with no BACKDROP_VIDEO_URL set the video renders nothing at all. */}
+        <BackdropVideo accent={p.accent} />
         <StorefrontField accent={p.accent} />
 
         <header className="sticky top-0 z-30 border-b border-[#e7e0d5] bg-[#fbfaf7]/85 backdrop-blur">
