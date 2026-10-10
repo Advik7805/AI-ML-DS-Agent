@@ -14,13 +14,15 @@ from contextlib import asynccontextmanager
 import json
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from core.agent.graph import HubAgent
 from core.agent.providers import Message, get_provider
 from core.contract import ModuleRegistry
+from core.integrations.ratelimit import get_limiter
 from core.types import Explanation, MetricsReport, ModuleManifest, Prediction
 
 @asynccontextmanager
@@ -54,6 +56,54 @@ app.add_middleware(
 
 #: Populated by the lifespan hook. Kept module-level so tests can swap it out.
 registry = ModuleRegistry()
+
+
+#: Paths never metered. `/health` is hit by the keep-alive cron every 10 minutes and must not
+#: be the request that trips the limit; `/` is the OpenAPI shell.
+_RATE_LIMIT_EXEMPT = frozenset({"/health", "/", "/docs", "/openapi.json", "/redoc"})
+
+
+@app.middleware("http")
+async def rate_limit(request: Request, call_next):
+    """Cap requests per client, so one crawler cannot exhaust a free-tier budget.
+
+    Only the mutating and compute-heavy paths are metered. `/health` is exempt because the
+    keep-alive cron hits it every 10 minutes and must never be the thing that trips the limit,
+    and the read-only discovery routes are cheap enough not to bother.
+
+    A limiter that raises would be worse than no limiter, so any failure inside it is swallowed
+    and the request proceeds. Availability beats accounting here.
+    """
+    if request.url.path in _RATE_LIMIT_EXEMPT or request.method == "OPTIONS":
+        return await call_next(request)
+
+    try:
+        limiter = get_limiter()
+        # Client IP if a proxy set one, else the socket peer. Unauthenticated, so this is a
+        # coarse brake rather than a security boundary — and it says so in the headers.
+        client = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+        if not client and request.client:
+            client = request.client.host
+        decision = limiter.check(f"{client or 'unknown'}:{request.url.path}")
+    except Exception:  # noqa: BLE001 - never let accounting take the API down
+        return await call_next(request)
+
+    if not decision.allowed:
+        return JSONResponse(
+            status_code=429,
+            content={
+                "detail": (
+                    f"Rate limit of {decision.limit} requests per {decision.reset_in}s exceeded "
+                    f"for this client. Counted by {decision.backend}."
+                )
+            },
+            headers=decision.headers(),
+        )
+
+    response = await call_next(request)
+    for k, v in decision.headers().items():
+        response.headers[k] = v
+    return response
 
 #: The hub agent. Provider is resolved from env at startup; falls back to the mock so the hub
 #: is a working product even with no API key configured.

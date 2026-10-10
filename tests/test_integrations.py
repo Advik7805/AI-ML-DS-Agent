@@ -125,3 +125,98 @@ def test_capabilities_reports_both_acquisition_paths(registry) -> None:
 def test_unknown_integration_is_loud() -> None:
     with pytest.raises(KeyError, match="known:"):
         cfg.get("does_not_exist")
+
+
+# --- rate limiting -------------------------------------------------------------
+
+
+def test_in_memory_limiter_enforces_the_limit() -> None:
+    from core.integrations.ratelimit import InMemoryLimiter
+
+    limiter = InMemoryLimiter(limit=3, window=60)
+    outcomes = [limiter.check("client-a").allowed for _ in range(5)]
+    assert outcomes == [True, True, True, False, False]
+
+
+def test_in_memory_limiter_is_scoped_per_key() -> None:
+    """One client tripping the limit must not lock out everyone else."""
+    from core.integrations.ratelimit import InMemoryLimiter
+
+    limiter = InMemoryLimiter(limit=1, window=60)
+    assert limiter.check("a").allowed is True
+    assert limiter.check("a").allowed is False
+    assert limiter.check("b").allowed is True, "limits must be per client, not global"
+
+
+def test_limiter_reports_its_own_weakness(monkeypatch) -> None:
+    """An in-memory counter is per-instance and resets on restart. Say so, do not imply more."""
+    from core.integrations import ratelimit
+
+    for var in ("UPSTASH_REDIS_REST_URL", "UPSTASH_REDIS_REST_TOKEN", "NEXUS_UPSTASH_LIVE"):
+        monkeypatch.delenv(var, raising=False)
+    ratelimit.reset_limiter()
+    s = ratelimit.status()
+    assert s["live"] is False
+    assert s["scope"] == "per process only"
+    assert s["warning"], "the fallback must disclose that it is not a shared limit"
+
+
+def test_upstash_is_selected_only_when_fully_configured(monkeypatch) -> None:
+    """URL without a token, or a token without the flag, must not half-enable."""
+    from core.integrations import ratelimit
+
+    monkeypatch.setenv("UPSTASH_REDIS_REST_URL", "https://example.upstash.io")
+    monkeypatch.setenv("UPSTASH_REDIS_REST_TOKEN", "tok")
+    monkeypatch.delenv("NEXUS_UPSTASH_LIVE", raising=False)
+    ratelimit.reset_limiter()
+    assert ratelimit.get_limiter().backend == "in-memory"
+
+    monkeypatch.setenv("NEXUS_UPSTASH_LIVE", "1")
+    ratelimit.reset_limiter()
+    assert ratelimit.get_limiter().backend == "upstash"
+    ratelimit.reset_limiter()
+
+
+def test_limiter_prunes_stale_keys() -> None:
+    """A long-lived 512 MB instance must not accumulate a counter per client forever."""
+    from core.integrations.ratelimit import InMemoryLimiter
+
+    limiter = InMemoryLimiter(limit=100, window=0)  # window 0 => everything is immediately stale
+    for i in range(5100):
+        limiter.check(f"client-{i}")
+    assert len(limiter._counts) < 5000
+
+
+# --- gateway middleware --------------------------------------------------------
+
+
+def test_health_is_exempt_from_rate_limiting() -> None:
+    """The keep-alive cron hits /health every 10 minutes and must never trip the limit."""
+    from fastapi.testclient import TestClient
+
+    from apps.api.main import app
+
+    with TestClient(app) as client:
+        for _ in range(20):
+            assert client.get("/health").status_code == 200
+
+
+def test_metered_route_returns_429_with_honest_headers(monkeypatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from apps.api.main import app
+    from core.integrations import ratelimit
+
+    # One shared instance, exactly as the memoised get_limiter() returns in production. Building
+    # a fresh limiter per call would reset the counter on every request and prove nothing.
+    limiter = ratelimit.InMemoryLimiter(limit=2, window=60)
+    monkeypatch.setattr("apps.api.main.get_limiter", lambda: limiter)
+
+    with TestClient(app) as client:
+        codes = [client.get("/api/v1/modules").status_code for _ in range(4)]
+        assert codes[:2] == [200, 200], codes
+        assert codes[2] == 429, codes
+        assert codes[3] == 429, codes
+        r = client.get("/api/v1/modules")
+        assert r.headers["X-RateLimit-Backend"] == "in-memory"
+        assert r.headers["X-RateLimit-Limit"] == "2"
