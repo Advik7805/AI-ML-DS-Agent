@@ -202,6 +202,7 @@ show what a deploy still needs. Copy [`.env.example`](.env.example) for the full
 |---|---|
 | [`docs/RESEARCH.md`](docs/RESEARCH.md) | Every relevant repo, with verified star counts and activity dates. What to build on, what to read, what to avoid. |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | The contract, the storefront topology (with the Next.js mechanism verified against source), the 3D brief, the phased plan. |
+| [`docs/DEPLOY.md`](docs/DEPLOY.md) | The $0 runbook: Render blueprint, Vercel import, keep-alive, and which integrations to enable first. |
 | [`docs/BUILD-NOTES.md`](docs/BUILD-NOTES.md) | Five real defects the test suite caught — calibration leakage, score flattening, a SHAP/explained-model mismatch, and more. |
 
 ---
