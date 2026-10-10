@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { AgentChat } from "@/components/hub/AgentChat";
+import { IntegrationsPanel } from "@/components/hub/IntegrationsPanel";
 import { ModuleGraph } from "@/components/hub/ModuleGraph";
 import { getModules } from "@/lib/api";
 import type { ModuleManifest } from "@/lib/types";
@@ -120,6 +121,23 @@ export default async function HubPage() {
 
           <div className="mt-8">
             <AgentChat />
+          </div>
+        </div>
+      </section>
+
+      {/* --- integrations ------------------------------------------------------ */}
+      <section id="integrations" className="scroll-mt-20 border-t border-line px-6 py-20 sm:px-10">
+        <div className="mx-auto max-w-4xl">
+          <h2 className="text-2xl font-semibold tracking-tight">Runs with nothing, lights up with keys</h2>
+          <p className="mt-3 text-[15px] leading-relaxed text-ink-dim">
+            No environment variable is required. Every external service degrades to a
+            deterministic mock that labels itself, so the platform is a working product on an
+            empty <code className="font-mono text-ink">.env</code> and gains real capabilities one
+            key at a time. A key alone never enables a metered service — each also needs its
+            explicit flag, so a local experiment cannot make a demo billable.
+          </p>
+          <div className="mt-8">
+            <IntegrationsPanel />
           </div>
         </div>
       </section>
