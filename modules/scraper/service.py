@@ -32,6 +32,7 @@ from urllib.parse import urlparse
 import numpy as np
 
 from core.contract import Module
+from core.integrations.tavily import capabilities, get_client
 from core.types import AgentTool, Explanation, MetricsReport, ModuleManifest, Prediction
 
 ACCENT = "#f97316"
@@ -263,8 +264,55 @@ class ScraperModule(Module):
                 },
             ),
             AgentTool(
+                name="web_search",
+                description=(
+                    "Search the live web via Tavily and return ranked, LLM-ready results. "
+                    "Use this when the answer is not in the local corpus. Runs on labelled mock "
+                    "data until TAVILY_API_KEY and NEXUS_TAVILY_LIVE=1 are set."
+                ),
+                module_id=self.id,
+                parameters_schema={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "The search query."},
+                        "max_results": {"type": "integer", "description": "Up to 20; costs 1 credit."},
+                        "topic": {
+                            "type": "string",
+                            "enum": ["general", "news", "finance"],
+                            "description": "Which index to search.",
+                        },
+                        "time_range": {
+                            "type": ["string", "null"],
+                            "enum": ["day", "week", "month", "year", None],
+                            "description": "Restrict to recent results.",
+                        },
+                    },
+                    "required": ["query"],
+                },
+            ),
+            AgentTool(
+                name="extract_url",
+                description=(
+                    "Extract the readable text of up to five URLs via Tavily. Unlike scrape_url "
+                    "this renders JavaScript and is not bound by the local allowlist, because "
+                    "Tavily does the fetching. Billed at 1 credit per 5 URLs."
+                ),
+                module_id=self.id,
+                parameters_schema={
+                    "type": "object",
+                    "properties": {
+                        "urls": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Absolute http(s) URLs, max 5 per call.",
+                        }
+                    },
+                    "required": ["urls"],
+                },
+            ),
+            AgentTool(
                 name="scraper_capabilities",
-                description="Report whether live scraping is enabled and which hosts are allowlisted.",
+                description="Report which acquisition backends are live, which are mocked, and what a deploy must set.",
                 module_id=self.id,
                 parameters_schema={"type": "object", "properties": {}},
             ),
@@ -278,14 +326,71 @@ class ScraperModule(Module):
             result["truncated"] = result["bytes"] > 4000
         return result
 
+    def tool_web_search(self, query: str, max_results: int = 5, topic: str = "general",
+                        time_range: str | None = None) -> dict[str, Any]:
+        """Live web search. Mock results are labelled so nothing invented gets cited."""
+        client = get_client()
+        try:
+            out = client.search(
+                query,
+                max_results=int(max_results or 5),
+                topic=topic or "general",
+                time_range=time_range,
+            )
+        except Exception as exc:  # noqa: BLE001 - degrade, never break the conversation
+            return {
+                "query": query,
+                "backend": "error",
+                "results": [],
+                "error": f"{type(exc).__name__}: {exc}",
+                "note": (
+                    "Live search failed. Falling back to the local corpus is safer than "
+                    "guessing — say you could not verify this."
+                ),
+            }
+        out["backend"] = client.backend
+        out["live"] = client.backend != "mock"
+        # Trim so a search cannot blow the context window.
+        for r in out.get("results", []):
+            if isinstance(r.get("content"), str):
+                r["content"] = r["content"][:600]
+        return out
+
+    def tool_extract_url(self, urls: list[str]) -> dict[str, Any]:
+        client = get_client()
+        cleaned = [str(u).strip() for u in (urls or []) if str(u).strip()][:5]
+        if not cleaned:
+            raise ValueError("Missing required features: urls")
+        for u in cleaned:
+            if not u.startswith(("http://", "https://")):
+                raise ValueError(f"urls must be absolute http(s) URLs, got {u!r}")
+        try:
+            out = client.extract(cleaned)
+        except Exception as exc:  # noqa: BLE001
+            return {"urls": cleaned, "backend": "error", "results": [],
+                    "error": f"{type(exc).__name__}: {exc}"}
+        out["backend"] = client.backend
+        out["live"] = client.backend != "mock"
+        # Echo the request so the summariser (and any UI) can say what was asked for even when
+        # the provider omits it from its response.
+        out["urls"] = cleaned
+        for r in out.get("results", []):
+            if isinstance(r.get("raw_content"), str):
+                r["raw_content"] = r["raw_content"][:4000]
+        return out
+
     def tool_scraper_capabilities(self) -> dict[str, Any]:
         cfg = _config()
+        tavily = capabilities()
         return {
             "live": cfg.live,
             "allowlist": cfg.allowlist,
             "fetcher": "http" if cfg.live else "mock",
             "max_bytes": MAX_BYTES,
-            "production_backend": "Firecrawl (not wired in this build)",
+            # Two acquisition paths, reported separately: a plain GET (allowlisted, cannot run
+            # JavaScript) and Tavily (renders JS, not allowlisted, costs credits).
+            "tavily": tavily,
+            "production_backend": "Tavily extract (wired) or Firecrawl (key ready, client not)",
         }
 
 

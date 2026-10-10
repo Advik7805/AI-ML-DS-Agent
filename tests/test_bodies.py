@@ -10,14 +10,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from core.contract import ModuleRegistry
-
-
-@pytest.fixture(scope="module")
-def registry() -> ModuleRegistry:
-    reg = ModuleRegistry().discover("modules")
-    assert getattr(reg, "load_errors", {}) == {}
-    return reg
+# `registry` comes from tests/conftest.py so every suite shares one discovery.
 
 
 # --- RAG ---------------------------------------------------------------------

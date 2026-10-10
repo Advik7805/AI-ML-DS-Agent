@@ -157,6 +157,21 @@ def train(module_id: str, body: ToolCallRequest | None = None) -> MetricsReport:
         raise HTTPException(status_code=501, detail=str(exc)) from None
 
 
+# --- integrations --------------------------------------------------------------
+
+
+@app.get("/api/v1/integrations")
+def integrations() -> dict[str, Any]:
+    """Which external services are live, which are mocked, and what a deploy must set.
+
+    Safe to expose publicly: it reports env var *names*, never values. The frontend reads this
+    to render "connect Tavily to enable live search" instead of failing silently.
+    """
+    from core.integrations.config import summary
+
+    return summary()
+
+
 # --- agent surface ------------------------------------------------------------
 
 

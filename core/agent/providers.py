@@ -71,6 +71,14 @@ class Provider(Protocol):
 #: Body-scoped patterns must come before generic ones, or "how good is the fraud model"
 #: resolves to the *churn* metrics tool. That bug shipped once already.
 _TOOL_HINTS: list[tuple[str, str]] = [
+    # Live-web intents sit first: they are the most specific, and a bare word like "churn" or
+    # "pricing" further down would otherwise win on "search the web for churn benchmarks".
+    # `extract_url` deliberately omits "scrape" and "fetch" — those belong to `scrape_url`.
+    (r"(?=[\s\S]*\b(extract\w*|read|get the text|parse|summarise\w* the page)\b)(?=[\s\S]*https?://)",
+     "extract_url"),
+    (r"(?=[\s\S]*\b(search\w*|look\w*|find|research\w*|latest|news)\b)"
+     r"(?=[\s\S]*\b(web|online|internet|google|tavily|news|recently|this week|today)\b)",
+     "web_search"),
     (r"\b(fraud\w*|transactions?|anomal\w*)\b[\s\S]*\b(metrics?|model|how (?:good|well)|perform\w*|evaluat\w*)\b",
      "get_fraud_model_metrics"),
     (r"\b(churn\w*|customers?|retention)\b[\s\S]*\b(metrics?|model card|how (?:good|well)|pr-?auc|roc(?:-auc)?|thresholds?|accuracy)\b",
@@ -108,8 +116,19 @@ _TOOL_HINTS: list[tuple[str, str]] = [
 
 
 def _pick_tool(user_text: str, available: set[str]) -> str | None:
+    """First matching hint wins, so ordering *is* the routing policy.
+
+    URLs are stripped before matching any pattern that does not explicitly require one. A URL's
+    path is not an intent: "extract https://example.com/pricing" routed to the pricing tool, and
+    "fetch https://news.ycombinator.com" routed to a news search, purely because of the host and
+    path text. Patterns that do need a URL declare it by containing `https?://`.
+    """
+    url_free = re.sub(r"https?://\S+", " ", user_text)
     for pattern, tool in _TOOL_HINTS:
-        if re.search(pattern, user_text, re.IGNORECASE) and tool in available:
+        if tool not in available:
+            continue
+        haystack = user_text if "https?://" in pattern else url_free
+        if re.search(pattern, haystack, re.IGNORECASE):
             return tool
     return None
 
@@ -243,6 +262,14 @@ class MockProvider:
                     args[name] = 0
                 elif "string" in types:
                     args[name] = user_text.strip()[:100] or "n/a"
+                elif "array" in types:
+                    # Arrays of URLs are the common case (extract_url). Pull every URL out of
+                    # the message rather than inventing one, and fall back to a single
+                    # placeholder so the tool still exercises its validation path.
+                    found = re.findall(r"https?://\S+", user_text)
+                    args[name] = found or ["https://example.com"]
+                elif "boolean" in types:
+                    args[name] = False
                 else:
                     args[name] = None
 
@@ -623,18 +650,73 @@ def _summarise(tool_output: str) -> str:
                 )
             return "\n".join(lines)
 
+        if "results" in data and "query" in data and "backend" in data:
+            if data.get("backend") == "error":
+                return (
+                    f"Live web search failed: {data.get('error', 'unknown error')}. "
+                    "I would rather say so than guess at an answer."
+                )
+            rows = data.get("results") or []
+            if not rows:
+                return f"The web search for {data['query']!r} returned nothing."
+            # The single most important line in this branch: mock results look exactly like
+            # real ones unless the answer says otherwise.
+            banner = (
+                ""
+                if data.get("live")
+                else "⚠ **Mock results — Tavily is not configured, so these are placeholders "
+                "and must not be cited.**\n\n"
+            )
+            lines = [f"{banner}Web search for **{data['query']}** ({data['backend']} backend):"]
+            if data.get("answer"):
+                lines.append(f"\n{data['answer']}")
+            for r in rows[:5]:
+                lines.append(f"\n- [{r.get('title', 'untitled')}]({r.get('url', '')})")
+                if r.get("content"):
+                    lines.append(f"  {str(r['content'])[:280]}")
+            if data.get("note"):
+                lines.append(f"\n_{data['note']}_")
+            return "\n".join(lines)
+
+        if "urls" in data and "backend" in data:
+            if data.get("backend") == "error":
+                return f"Extraction failed: {data.get('error', 'unknown error')}."
+            rows = data.get("results") or []
+            banner = (
+                ""
+                if data.get("live")
+                else "⚠ **Mock extraction — Tavily is not configured; no page was fetched.**\n\n"
+            )
+            lines = [f"{banner}Extracted {len(rows)} URL(s):"]
+            for r in rows:
+                body = " ".join(str(r.get("raw_content", "")).split())[:300]
+                lines.append(f"\n- `{r.get('url', '')}`\n  {body}")
+            return "\n".join(lines)
+
         if "fetcher" in data and "allowlist" in data:
             allow = data["allowlist"] or []
-            return (
+            tavily = data.get("tavily") or {}
+            lines = [
                 f"Scraper runs in **{'live' if data['live'] else 'mock'}** mode via "
                 f"`{data['fetcher']}`, capped at {int(data['max_bytes']):,} bytes.\n"
                 + (
                     f"Host allowlist: {', '.join(allow)}."
                     if allow
-                    else "No hosts are allowlisted, so live fetching is blocked for every URL."
+                    else "No hosts are allowlisted, so plain-HTTP fetching is blocked for every URL."
+                ),
+            ]
+            if tavily:
+                lines.append(
+                    f"Tavily (web search + JS-rendering extract): "
+                    f"**{'live' if tavily.get('live') else 'mock'}** — "
+                    f"{tavily.get('free_tier', '')}"
                 )
-                + f"\nProduction backend: {data.get('production_backend', 'n/a')}."
-            )
+                if not tavily.get("live"):
+                    lines.append(
+                        f"To go live, set `{tavily.get('key_env')}` and "
+                        f"`{tavily.get('enable_env')}=1`."
+                    )
+            return "\n".join(lines)
 
         if "markdown" in data or "content" in data:
             body = (data.get("markdown") or data.get("content") or "")[:300]
