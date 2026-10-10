@@ -220,3 +220,61 @@ def test_metered_route_returns_429_with_honest_headers(monkeypatch) -> None:
         r = client.get("/api/v1/modules")
         assert r.headers["X-RateLimit-Backend"] == "in-memory"
         assert r.headers["X-RateLimit-Limit"] == "2"
+
+
+# --- Firecrawl -----------------------------------------------------------------
+
+
+def test_firecrawl_defaults_to_a_labelled_mock() -> None:
+    from core.integrations.firecrawl import MockFirecrawl, get_client
+
+    client = get_client()
+    assert isinstance(client, MockFirecrawl)
+    out = client.scrape("https://example.com/app")
+    assert out["backend"] == "mock"
+    assert out["markdown"].startswith("[mock]")
+
+
+def test_firecrawl_key_plus_flag_selects_the_live_client(monkeypatch) -> None:
+    from core.integrations import config as cfg
+    from core.integrations.firecrawl import FirecrawlClient, MockFirecrawl, get_client
+
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-x")
+    monkeypatch.delenv("NEXUS_FIRECRAWL_LIVE", raising=False)
+    assert cfg.FIRECRAWL.enabled is False, "a key alone must not enable a metered service"
+    assert isinstance(get_client(), MockFirecrawl)
+
+    monkeypatch.setenv("NEXUS_FIRECRAWL_LIVE", "1")
+    assert isinstance(get_client(), FirecrawlClient)
+
+
+def test_firecrawl_client_refuses_an_empty_key() -> None:
+    from core.integrations.firecrawl import FirecrawlClient
+
+    with pytest.raises(cfg.NotConfigured) as exc:
+        FirecrawlClient("")
+    assert "FIRECRAWL_API_KEY" in str(exc.value)
+
+
+def test_render_url_is_wired_into_the_scraper_body(registry) -> None:
+    scraper = registry.get("scraper")
+    out = scraper.call_tool("render_url", {"url": "https://example.com/app"})
+    assert out["backend"] == "mock"
+    assert out["live"] is False
+    assert out["markdown"].startswith("[mock]")
+
+
+def test_render_url_validates_the_scheme(registry) -> None:
+    with pytest.raises(ValueError, match="absolute http"):
+        registry.get("scraper").call_tool("render_url", {"url": "example.com/no-scheme"})
+
+
+def test_capabilities_reports_all_three_acquisition_paths(registry) -> None:
+    """Plain GET, Tavily extract and Firecrawl render have different limits and different
+    free-tier economics (Tavily refills monthly, Firecrawl does not). Conflating them would
+    lead an operator to spend the wrong allowance."""
+    caps = registry.get("scraper").call_tool("scraper_capabilities", {})
+    assert "tavily" in caps and "firecrawl" in caps
+    assert caps["tavily"]["live"] is False
+    assert caps["firecrawl"]["live"] is False
+    assert "one-time" in caps["firecrawl"]["free_tier"].lower()

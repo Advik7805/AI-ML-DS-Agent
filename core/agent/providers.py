@@ -74,14 +74,29 @@ _TOOL_HINTS: list[tuple[str, str]] = [
     # Live-web intents sit first: they are the most specific, and a bare word like "churn" or
     # "pricing" further down would otherwise win on "search the web for churn benchmarks".
     # `extract_url` deliberately omits "scrape" and "fetch" — those belong to `scrape_url`.
+    (r"(?=[\s\S]*\b(render\w*|browser|javascript|js-rendered|client-rendered|dynamic\w*|firecrawl)\b)"
+     r"(?=[\s\S]*https?://)",
+     "render_url"),
     (r"(?=[\s\S]*\b(extract\w*|read|get the text|parse|summarise\w* the page)\b)(?=[\s\S]*https?://)",
      "extract_url"),
     (r"(?=[\s\S]*\b(search\w*|look\w*|find|research\w*|latest|news)\b)"
      r"(?=[\s\S]*\b(web|online|internet|google|tavily|news|recently|this week|today)\b)",
      "web_search"),
-    (r"\b(fraud\w*|transactions?|anomal\w*)\b[\s\S]*\b(metrics?|model|how (?:good|well)|perform\w*|evaluat\w*)\b",
+    # Body-scoped metrics patterns, all as dual lookaheads. Two reasons they are grouped here
+    # and written order-independently:
+    #   1. They must precede both the generic metrics hint (which defaults to churn) and the
+    #      per-body action tools, whose patterns match the same nouns. "What is the MAE of the
+    #      RUL model?" otherwise resolves to `predict_rul` on the word "RUL" alone.
+    #   2. `a[\s\S]*b` assumes word order. "How good is the maintenance model?" puts the noun
+    #      *before* the metric word, so a sequence pattern silently misses it.
+    (r"(?=[\s\S]*\b(fraud\w*|transactions?|anomal\w*)\b)"
+     r"(?=[\s\S]*\b(metrics?|model cards?|how (?:good|well)|perform\w*|evaluat\w*)\b)",
      "get_fraud_model_metrics"),
-    (r"\b(churn\w*|customers?|retention)\b[\s\S]*\b(metrics?|model card|how (?:good|well)|pr-?auc|roc(?:-auc)?|thresholds?|accuracy)\b",
+    (r"(?=[\s\S]*\b(maintenance|rul\b|remaining useful life|turbofans?|engines?|fleets?|machines?|assets?)\b)"
+     r"(?=[\s\S]*\b(metrics?|model cards?|how (?:good|well)|perform\w*|evaluat\w*|mae\b|rmse\b|r2\b|r-?squared)\b)",
+     "get_maintenance_model_metrics"),
+    (r"(?=[\s\S]*\b(churn\w*|customers?|retention)\b)"
+     r"(?=[\s\S]*\b(metrics?|model cards?|how (?:good|well)|pr-?auc|roc(?:-auc)?|thresholds?|accuracy)\b)",
      "get_churn_model_metrics"),
     (r"\b(fairness|bias|audit\w*|disparate|equit\w*|demographic)\b", "audit_model_fairness"),
     (r"\b(diabetes|patients?|clinical|glucose|hba1c|diagnos\w*|health risk)\b", "assess_diabetes_risk"),
@@ -717,6 +732,20 @@ def _summarise(tool_output: str) -> str:
                         f"`{tavily.get('enable_env')}=1`."
                     )
             return "\n".join(lines)
+
+        if "markdown" in data and "backend" in data:
+            if data.get("backend") == "error":
+                return f"Rendering failed: {data.get('error', 'unknown error')}."
+            body = " ".join(str(data.get("markdown", "")).split())[:400]
+            banner = (
+                ""
+                if data.get("live")
+                else "⚠ **Mock render — Firecrawl is not configured; no page was fetched.**\n\n"
+            )
+            return (
+                f"{banner}Rendered `{data.get('url', '')}` via **{data.get('backend')}** "
+                f"(HTTP {data.get('status', '?')}):\n\n{body}…"
+            )
 
         if "markdown" in data or "content" in data:
             body = (data.get("markdown") or data.get("content") or "")[:300]

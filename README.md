@@ -33,7 +33,7 @@ and identity — while connecting to the hub through one shared contract.
 | Web scraper | `/scraper` | mock by default | host-allowlisted, size-capped |
 
 **117 tests passing** (`python3 -m pytest -q`), across `tests/test_contract.py` and
-`tests/test_bodies.py`. **17 tools** register into one registry, names globally unique.
+`tests/test_bodies.py`. **20 tools** register into one registry, names globally unique.
 
 Results are read from the live gateway, not a notebook — e.g.
 `GET /api/v1/modules/churn/metrics` and `GET /api/v1/agent/tools`.
@@ -116,7 +116,7 @@ deploy/          API Dockerfile
 ```bash
 pip install -r requirements.txt
 bash data/fetch.sh                    # real dataset; optional — synthetic fallback works
-python -m pytest                      # 130 tests
+python -m pytest                      # 153 tests
 python -m modules.churn.train         # held-out metrics
 uvicorn apps.api.main:app --reload    # http://localhost:8000/docs
 ```
@@ -189,8 +189,8 @@ show what a deploy still needs. Copy [`.env.example`](.env.example) for the full
 | Tavily | scraper, rag | 1,000 credits/mo, no card | ✅ `web_search`, `extract_url` |
 | Groq / Gemini | agent | free tiers | ✅ `NEXUS_LLM=groq\|gemini` |
 | Supabase | rag | 500 MB + pgvector | key read, client pending |
-| Upstash | api, scraper | 10k commands/day | key read, client pending |
-| Firecrawl | scraper | 500 credits one-time | key read, client pending |
+| Upstash | api, scraper | 10k commands/day | ✅ rate limiting on every metered route |
+| Firecrawl | scraper | 500 credits one-time | ✅ `render_url` (JS-rendering) |
 
 
 ---

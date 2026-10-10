@@ -32,6 +32,8 @@ from urllib.parse import urlparse
 import numpy as np
 
 from core.contract import Module
+from core.integrations.firecrawl import capabilities as firecrawl_capabilities
+from core.integrations.firecrawl import get_client as get_firecrawl_client
 from core.integrations.tavily import capabilities, get_client
 from core.types import AgentTool, Explanation, MetricsReport, ModuleManifest, Prediction
 
@@ -311,6 +313,27 @@ class ScraperModule(Module):
                 },
             ),
             AgentTool(
+                name="render_url",
+                description=(
+                    "Fetch a JavaScript-rendered page as markdown via Firecrawl. Use this instead "
+                    "of scrape_url when a plain GET returns an empty shell — dashboards, docs "
+                    "portals, anything client-rendered. The free tier is 500 credits ONE TIME, so "
+                    "prefer scrape_url or Tavily extract unless the page genuinely needs a browser."
+                ),
+                module_id=self.id,
+                parameters_schema={
+                    "type": "object",
+                    "properties": {
+                        "url": {"type": "string", "description": "Absolute http(s) URL."},
+                        "wait_for": {
+                            "type": "integer",
+                            "description": "Milliseconds to wait for JS to settle. Default 0.",
+                        },
+                    },
+                    "required": ["url"],
+                },
+            ),
+            AgentTool(
                 name="scraper_capabilities",
                 description="Report which acquisition backends are live, which are mocked, and what a deploy must set.",
                 module_id=self.id,
@@ -379,6 +402,32 @@ class ScraperModule(Module):
                 r["raw_content"] = r["raw_content"][:4000]
         return out
 
+    def tool_render_url(self, url: str, wait_for: int = 0) -> dict[str, Any]:
+        """JS-rendering scrape. Not bound by the local allowlist: Firecrawl does the fetching."""
+        target = str(url).strip()
+        if not target.startswith(("http://", "https://")):
+            raise ValueError(f"url must be absolute http(s), got {target!r}")
+        client = get_firecrawl_client()
+        try:
+            out = client.scrape(target, wait_for=int(wait_for or 0))
+        except Exception as exc:  # noqa: BLE001 - degrade, never break the conversation
+            return {
+                "url": target,
+                "backend": "error",
+                "status": 0,
+                "markdown": "",
+                "error": f"{type(exc).__name__}: {exc}",
+                "note": (
+                    "Rendering failed. A plain GET via scrape_url may still work if the page is "
+                    "server-rendered."
+                ),
+            }
+        out["backend"] = client.backend
+        out["live"] = client.backend != "mock"
+        if isinstance(out.get("markdown"), str):
+            out["markdown"] = out["markdown"][:4000]
+        return out
+
     def tool_scraper_capabilities(self) -> dict[str, Any]:
         cfg = _config()
         tavily = capabilities()
@@ -390,7 +439,11 @@ class ScraperModule(Module):
             # Two acquisition paths, reported separately: a plain GET (allowlisted, cannot run
             # JavaScript) and Tavily (renders JS, not allowlisted, costs credits).
             "tavily": tavily,
-            "production_backend": "Tavily extract (wired) or Firecrawl (key ready, client not)",
+            "firecrawl": firecrawl_capabilities(),
+            "production_backend": (
+                "Tavily extract and Firecrawl scrape are both wired; pick by whether the page "
+                "needs a browser and which free allowance you are spending."
+            ),
         }
 
 

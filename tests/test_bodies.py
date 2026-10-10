@@ -425,6 +425,18 @@ ROUTING_PROBES = [
     ("Search the knowledge base for the refund window", "search_knowledge"),
     ("What discount can an agent approve?", "search_knowledge"),
     ("What are the churn model metrics?", "get_churn_model_metrics"),
+    ("How good is the churn model?", "get_churn_model_metrics"),
+    ("What are the fraud model metrics?", "get_fraud_model_metrics"),
+    # Word order must not matter: the noun can come before OR after the metric word.
+    ("Show the maintenance model card", "get_maintenance_model_metrics"),
+    ("How good is the maintenance model?", "get_maintenance_model_metrics"),
+    # And a metrics question must not resolve to the action tool just because it shares a noun.
+    ("What is the MAE of the RUL model?", "get_maintenance_model_metrics"),
+    ("Render https://dashboard.example.com in a browser", "render_url"),
+    ("Fetch the JS-rendered page https://example.com/app", "render_url"),
+    ("Extract https://example.com/pricing", "extract_url"),
+    ("Scrape https://example.com", "scrape_url"),
+    ("Search the web for the latest churn benchmarks", "web_search"),
     ("Rank the top 5 customers most likely to churn", "rank_at_risk_customers"),
     ("How good is the fraud model?", "get_fraud_model_metrics"),
     ("Score this transaction for fraud", "score_transaction"),
