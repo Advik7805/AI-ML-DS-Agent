@@ -116,7 +116,7 @@ deploy/          API Dockerfile
 ```bash
 pip install -r requirements.txt
 bash data/fetch.sh                    # real dataset; optional — synthetic fallback works
-python -m pytest                      # 153 tests
+python -m pytest                      # 168 tests
 python -m modules.churn.train         # held-out metrics
 uvicorn apps.api.main:app --reload    # http://localhost:8000/docs
 ```
