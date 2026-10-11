@@ -593,3 +593,30 @@ def test_every_body_that_saves_an_artifact_versions_it() -> None:
                 f"{path} pickles directly instead of using core.artifacts; a field added to its "
                 "bundle would silently vanish from cached artifacts."
             )
+
+
+def test_frontend_body_mirror_matches_the_registry(registry) -> None:
+    """The hub renders a static mirror of the bodies (apps/web/lib/types.ts KNOWN_BODIES) as a
+    cold-backend fallback. When that mirror listed five bodies as "planned" while the backend had
+    all seven live, the hub showed working products as not-yet-built. Pin the mirror to the
+    registry so the two cannot drift again: same ids, and each mirror href equals the body's own
+    advertised UI route."""
+    import pathlib
+    import re
+
+    src = pathlib.Path("apps/web/lib/types.ts").read_text()
+    block = src.split("KNOWN_BODIES", 1)[1]
+    mirror_ids = re.findall(r'\bid:\s*"([^"]+)"', block)
+    mirror_hrefs = dict(re.findall(r'\bid:\s*"([^"]+)",.*?href:\s*"([^"]+)"', block, re.S))
+
+    assert set(mirror_ids) == set(registry.ids()), (
+        f"frontend mirror {sorted(mirror_ids)} != registry {sorted(registry.ids())}; "
+        "a body added to one and not the other makes the hub lie about what exists."
+    )
+
+    for mid in mirror_ids:
+        manifest = registry.get(mid).manifest
+        assert mirror_hrefs.get(mid) == manifest.routes.get("ui"), (
+            f"mirror href for {mid} ({mirror_hrefs.get(mid)}) != its UI route "
+            f"({manifest.routes.get('ui')}); clicking the tile would land somewhere wrong."
+        )

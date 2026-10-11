@@ -6,7 +6,7 @@ import { RunLog } from "@/components/hub/RunLog";
 import { ModuleGraph } from "@/components/hub/ModuleGraph";
 import { getModules } from "@/lib/api";
 import type { ModuleManifest } from "@/lib/types";
-import { ROADMAP } from "@/lib/types";
+import { KNOWN_BODIES } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -24,13 +24,37 @@ export default async function HubPage() {
   const { modules, error } = await loadModules();
   const live = new Map(modules.map((m) => [m.id, m]));
 
+  // Every body the API reports, rendered from its live manifest; when the backend is asleep the
+  // static mirror keeps the grid clickable. The API's statuses win over the mirror.
+  const tiles: BodyTileProps[] = modules.length
+    ? modules.map((m) => ({
+        id: m.id,
+        title: m.title,
+        blurb: m.summary,
+        accent: m.accent,
+        status: m.status,
+        tools: m.tools.map((t) => t.name),
+        href: m.routes?.ui,
+      }))
+    : KNOWN_BODIES.map((b) => ({
+        id: b.id,
+        title: b.title,
+        blurb: b.blurb,
+        accent: b.accent,
+        status: "live" as const,
+        tools: [],
+        href: b.href,
+      }));
+  const liveCount = tiles.filter((t) => t.status !== "planned").length;
+  const plannedCount = tiles.length - liveCount;
+
   return (
     <>
       {/* --- hero: the 3D graph IS the navigation ----------------------------- */}
       <section className="px-6 pt-6 sm:px-10">
         <div className="mx-auto max-w-3xl text-center">
           <p className="font-mono text-[11px] uppercase tracking-[0.3em] text-hub">
-            {modules.length} live · {ROADMAP.length + 1} planned
+            {liveCount} live · {plannedCount} planned
           </p>
           <h1 className="mt-5 text-4xl font-semibold leading-[1.05] tracking-tight sm:text-6xl">
             One hub.
@@ -72,30 +96,8 @@ export default async function HubPage() {
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {/* Live body first — churn. */}
-            <BodyTile
-              id="churn"
-              title={live.get("churn")?.title ?? "Churn & Retention"}
-              blurb={
-                live.get("churn")?.summary ??
-                "Gradient-boosted churn scoring with SMOTE, isotonic calibration and SHAP explanations."
-              }
-              accent="#f59e0b"
-              status="live"
-              tools={live.get("churn")?.tools.map((t) => t.name) ?? []}
-              href="/churn"
-            />
-
-            {ROADMAP.map((r) => (
-              <BodyTile
-                key={r.id}
-                id={r.id}
-                title={r.title}
-                blurb={r.blurb}
-                accent={r.accent}
-                status="planned"
-                tools={[]}
-              />
+            {tiles.map((t) => (
+              <BodyTile key={t.id} {...t} />
             ))}
           </div>
         </div>
@@ -172,27 +174,23 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function BodyTile({
-  id,
-  title,
-  blurb,
-  accent,
-  status,
-  tools,
-  href,
-}: {
+interface BodyTileProps {
   id: string;
   title: string;
   blurb: string;
   accent: string;
-  status: "live" | "planned";
+  status: "live" | "beta" | "planned";
   tools: string[];
   href?: string;
-}) {
+}
+
+function BodyTile({ id, title, blurb, accent, status, tools, href }: BodyTileProps) {
+  // "beta" is enterable too — it is a running body, just labelled as not yet stable.
+  const enterable = status !== "planned" && Boolean(href);
   const inner = (
     <div
       className="glass group relative h-full overflow-hidden rounded-2xl p-5 transition duration-300 hover:-translate-y-1"
-      style={{ borderColor: status === "live" ? `${accent}55` : undefined }}
+      style={{ borderColor: enterable ? `${accent}55` : undefined }}
     >
       <div
         className="absolute -right-10 -top-10 h-28 w-28 rounded-full opacity-20 blur-2xl transition-opacity duration-500 group-hover:opacity-45"
@@ -203,7 +201,7 @@ function BodyTile({
           <span className="h-2.5 w-2.5 rotate-45 rounded-[2px]" style={{ background: accent }} />
           <span
             className="font-mono text-[10px] uppercase tracking-widest"
-            style={{ color: status === "live" ? accent : "#5b6382" }}
+            style={{ color: status !== "planned" ? accent : "#5b6382" }}
           >
             {status}
           </span>
@@ -224,7 +222,7 @@ function BodyTile({
 
         <div className="mt-5 flex items-center justify-between">
           <span className="font-mono text-[10px] uppercase tracking-widest text-ink-faint">/{id}</span>
-          {status === "live" && href && (
+          {enterable && (
             <span className="text-[12px] font-medium" style={{ color: accent }}>
               enter →
             </span>
@@ -234,7 +232,7 @@ function BodyTile({
     </div>
   );
 
-  return href && status === "live" ? (
+  return enterable && href ? (
     <Link href={href} className="block h-full">
       {inner}
     </Link>

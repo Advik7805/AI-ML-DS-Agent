@@ -19,7 +19,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 
 import type { ModuleManifest } from "@/lib/types";
-import { ROADMAP } from "@/lib/types";
+import { KNOWN_BODIES } from "@/lib/types";
 
 interface Node {
   id: string;
@@ -27,6 +27,8 @@ interface Node {
   blurb: string;
   accent: string;
   live: boolean;
+  /** The body's own storefront. Null only for a body that genuinely does not exist yet. */
+  href: string | null;
   radius: number;
   speed: number;
   phase: number;
@@ -146,7 +148,7 @@ function Body({ node, onHover }: { node: Node; onHover: (id: string | null) => v
           }}
           onClick={(e) => {
             e.stopPropagation();
-            if (node.live) router.push(`/churn`);
+            if (node.href) router.push(node.href);
           }}
           scale={hovered ? 1.35 : 1}
         >
@@ -200,23 +202,33 @@ export function ModuleGraph({ live }: { live: ModuleManifest[] }) {
     return () => io.disconnect();
   }, []);
 
-  const liveIds = new Set(live.map((m) => m.id));
-
   const nodes: Node[] = useMemo(() => {
-    const all = [
-      { id: "churn", title: "Churn & Retention", blurb: "", accent: "#f59e0b" },
-      ...ROADMAP.map((r) => ({ id: r.id, title: r.title, blurb: r.blurb, accent: r.accent })),
-    ];
-    return all.map((n, i) => ({
+    // Live manifests win; when the backend is asleep the static mirror keeps the graph whole.
+    const base = live.length
+      ? live.map((m) => ({
+          id: m.id,
+          title: m.title,
+          blurb: m.summary,
+          accent: m.accent,
+          live: m.status !== "planned",
+          href: m.routes?.ui ?? null,
+        }))
+      : KNOWN_BODIES.map((b) => ({
+          id: b.id,
+          title: b.title,
+          blurb: b.blurb,
+          accent: b.accent,
+          live: true,
+          href: b.href as string | null,
+        }));
+    return base.map((n, i) => ({
       ...n,
-      live: liveIds.has(n.id),
       radius: 3.0 + (i % 3) * 0.85,
       speed: 0.22 + (i % 4) * 0.045,
-      phase: (i / all.length) * Math.PI * 2,
+      phase: (i / base.length) * Math.PI * 2,
       tilt: 0.35 + (i % 3) * 0.22,
     }));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [live.map((m) => m.id).join(",")]);
+  }, [live]);
 
   const activeNode = nodes.find((n) => n.id === active);
 
@@ -247,8 +259,8 @@ export function ModuleGraph({ live }: { live: ModuleManifest[] }) {
         <div className="flex h-full w-full items-center justify-center">
           <div className="relative flex h-64 w-64 items-center justify-center rounded-full border border-white/10">
             <div className="h-20 w-20 rounded-2xl bg-[#7c5cff] shadow-[0_0_80px_20px_rgba(124,92,255,0.45)]" />
-            {nodes.slice(0, 6).map((n, i) => {
-              const a = (i / 6) * Math.PI * 2;
+            {nodes.map((n, i) => {
+              const a = (i / nodes.length) * Math.PI * 2;
               return (
                 <span
                   key={n.id}

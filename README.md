@@ -166,8 +166,7 @@ backend, which is what makes it work behind a preview host with no CORS.
 | **Explainable Diagnostics** | live | Gradient boosting on real Pima data, SHAP + Fairlearn disparity audit |
 | **Knowledge RAG** | live | TF-IDF over a chunked markdown corpus; optional extra documents from Supabase |
 | **Dynamic Pricing** | live | Log-log demand elasticity with standard errors, per-SKU opportunity ranking |
-| **Data Acquisition** | live | Tavily search + extract, Firecrawl JS rendering, SSRF-guarded fetch |
-| Scraper | planned | Firecrawl API, zero self-hosting |
+| **Data Acquisition** | live | Tavily search + extract, Jina keyless rendering, Firecrawl when configured, SSRF-guarded fetch |
 
 ---
 
