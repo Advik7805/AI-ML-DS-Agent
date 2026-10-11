@@ -420,6 +420,15 @@ def test_every_tool_result_gets_summarised(registry) -> None:
 
 
 ROUTING_PROBES = [
+    # Drift checks. These sit ahead of the body-scoped metrics patterns in _TOOL_HINTS:
+    # "is the fraud model still valid?" contains both a body noun and a model noun, so without
+    # that ordering it resolves to the metrics tool and the drift check is unreachable.
+    ("has the fraud feed drifted?", "check_fraud_drift"),
+    ("is the fraud model still valid?", "check_fraud_drift"),
+    ("check drift on the transaction stream", "check_fraud_drift"),
+    ("has the fleet drifted?", "check_fleet_drift"),
+    ("is the maintenance model still valid?", "check_fleet_drift"),
+    ("check sensor drift on the engines", "check_fleet_drift"),
     ("List the knowledge sources", "list_knowledge_sources"),
     ("What documents are in the corpus?", "list_knowledge_sources"),
     ("Search the knowledge base for the refund window", "search_knowledge"),
@@ -466,3 +475,110 @@ def test_agent_routes_each_question_to_the_right_tool(registry, question, want) 
     available = {t.name for t in registry.all_tools()}
     got = _pick_tool(question, available)
     assert got == want, f"{question!r} routed to {got!r}, expected {want!r}"
+
+
+# --- drift detection -----------------------------------------------------------
+
+
+def test_psi_is_zero_for_identical_and_grows_with_shift() -> None:
+    """PSI must actually discriminate, or the verdicts it produces are decoration."""
+    import numpy as np
+
+    from core.drift import population_stability_index
+
+    rng = np.random.default_rng(0)
+    ref = rng.lognormal(3.5, 0.8, 4000)
+
+    same = population_stability_index(ref, rng.lognormal(3.5, 0.8, 2000))
+    mid = population_stability_index(ref, rng.lognormal(3.9, 0.8, 2000))
+    far = population_stability_index(ref, rng.lognormal(4.6, 0.8, 2000))
+
+    assert same < 0.05, "an identical draw must read as no drift"
+    assert same < mid < far, "PSI must be monotonic in shift size"
+    assert far > 0.25, "a large shift must cross the significant threshold"
+
+
+def test_drift_verdicts_match_the_documented_thresholds() -> None:
+    from core.drift import MODERATE, SIGNIFICANT, verdict
+
+    assert "no significant" in verdict(0.01)
+    assert "moderate" in verdict((MODERATE + SIGNIFICANT) / 2)
+    assert "significant" in verdict(SIGNIFICANT + 0.1)
+
+
+def test_bin_edges_are_cut_on_the_reference_not_the_actual() -> None:
+    """If you re-bin on the incoming data you measure it against itself and never see drift."""
+    import numpy as np
+
+    from core.drift import psi_bins
+
+    ref = np.random.default_rng(1).normal(0, 1, 2000)
+    edges = psi_bins(ref)
+    assert edges[0] == -np.inf and edges[-1] == np.inf, "outer bins must be open"
+    # Same edges reused for a shifted sample still show the shift.
+    from core.drift import population_stability_index
+
+    shifted = np.random.default_rng(2).normal(3, 1, 2000)
+    assert population_stability_index(ref, shifted, edges=edges) > 0.25
+
+
+def test_fraud_drift_tool_reports_against_the_training_distribution(registry) -> None:
+    out = registry.get("fraud").call_tool("check_fraud_drift", {"n": 300})
+    assert out["n_features_scored"] > 0
+    assert out["reference_size"] > 0
+    assert "thresholds" in out and out["thresholds"]["significant"] == 0.25
+    assert out["caveats"], "the marginals-only blind spot must be disclosed"
+    # Fresh synthetic transactions come from the same generator, so this must read clean.
+    assert out["mean_psi"] < 0.1, f"false positive: mean_psi={out['mean_psi']}"
+
+
+def test_fleet_drift_tool_reads_clean_on_same_generator_data(registry) -> None:
+    """Regression: the generator drew sensor baselines from its seed, so two calls produced
+    marginals ~22 sigma apart and this reported significant drift on identical-distribution
+    data. Baselines are now derived from the sensor name, as real CMAPSS sensors are fixed."""
+    out = registry.get("maintenance").call_tool("check_fleet_drift", {"n_engines": 12})
+    assert out["mean_psi"] < 0.1, f"false positive: mean_psi={out['mean_psi']}"
+    assert out["reference_source"] in ("synthetic", "cmapss-fd001")
+
+
+def test_stale_artifacts_are_rejected_not_silently_loaded(tmp_path) -> None:
+    """A pickled dataclass omits fields added since it was written, so an old bundle loads fine
+    and then raises AttributeError at the call site. Versioning turns that into a retrain."""
+    import pickle
+
+    from core.artifacts import SCHEMA, StaleArtifactError, load, save
+
+    # A module-level stand-in: a locally-defined class cannot be pickled at all, which would
+    # make this test fail for a reason unrelated to versioning.
+    from core.types import MetricsReport
+
+    payload = MetricsReport(n_samples=10, positive_rate=0.1, scores={"pr_auc": 0.5},
+                            confusion={}, threshold=0.4, notes=[], groups={}, group_basis="")
+
+    path = tmp_path / "model.pkl"
+    with path.open("wb") as fh:
+        pickle.dump(payload, fh)  # no schema envelope at all - the pre-versioning shape
+    with pytest.raises(StaleArtifactError, match="no schema version"):
+        load(path)
+
+    with path.open("wb") as fh:
+        pickle.dump({"schema": SCHEMA - 1, "bundle": payload}, fh)
+    with pytest.raises(StaleArtifactError, match="Retraining"):
+        load(path)
+
+    save(payload, path)
+    assert load(path).n_samples == 10, "a current-schema artifact must load"
+
+
+def test_every_body_that_saves_an_artifact_versions_it() -> None:
+    """Forgetting one body reintroduces the AttributeError-at-the-call-site bug for that body
+    only, which is exactly the kind of failure that shows up in production and not in CI."""
+    import pathlib
+
+    for path in pathlib.Path("modules").rglob("*.py"):
+        src = path.read_text()
+        if "pickle.dump" in src:
+            assert "core.artifacts" in src, (
+                f"{path} pickles directly instead of using core.artifacts; a field added to its "
+                "bundle would silently vanish from cached artifacts."
+            )

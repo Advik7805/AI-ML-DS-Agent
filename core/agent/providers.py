@@ -82,6 +82,18 @@ _TOOL_HINTS: list[tuple[str, str]] = [
     (r"(?=[\s\S]*\b(search\w*|look\w*|find|research\w*|latest|news)\b)"
      r"(?=[\s\S]*\b(web|online|internet|google|tavily|news|recently|this week|today)\b)",
      "web_search"),
+    # Drift checks, ahead of the body-scoped metrics patterns. They must win on phrasings like
+    # "is the fraud model still valid?" which contain both a body noun and a model noun - left
+    # lower down, that question resolves to the metrics tool and the drift check is unreachable.
+    (r"(?=[\s\S]*\b(fraud\w*|transactions?|anomal\w*|payment\w*|card\w*)\b)"
+     r"(?=[\s\S]*\b(drift\w*|drifted|still (?:valid|accurate|reliable)|distribution shift|"
+     r"out of distribution|stale\w*|degrad\w*|psi\b)\b)",
+     "check_fraud_drift"),
+    (r"(?=[\s\S]*\b(maintenance|rul\b|remaining useful life|turbofans?|engines?|fleets?|machines?|"
+     r"assets?|sensors?|telemetry)\b)"
+     r"(?=[\s\S]*\b(drift\w*|drifted|still (?:valid|accurate|reliable)|distribution shift|"
+     r"out of distribution|stale\w*|degrad\w*|psi\b)\b)",
+     "check_fleet_drift"),
     # Body-scoped metrics patterns, all as dual lookaheads. Two reasons they are grouped here
     # and written order-independently:
     #   1. They must precede both the generic metrics hint (which defaults to churn) and the
@@ -731,6 +743,33 @@ def _summarise(tool_output: str) -> str:
                         f"To go live, set `{tavily.get('key_env')}` and "
                         f"`{tavily.get('enable_env')}=1`."
                     )
+            return "\n".join(lines)
+
+        # Drift reports. Keyed on the distinctive shape, and placed before the generic markdown
+        # branch - a branch keyed on a common field swallows a more specific one.
+        if "mean_psi" in data and "overall" in data:
+            top = data.get("top") or []
+            worst = ", ".join(f"{t['feature']} {t['psi']}" for t in top[:3])
+            lines = [
+                f"Drift check: {data.get('overall', 'unknown')}.",
+                f"Mean PSI across {data.get('n_features_scored', 0)} features is "
+                f"{data.get('mean_psi', 0)} "
+                f"({data.get('n_drifted', 0)} above the significant threshold, "
+                f"{data.get('n_watching', 0)} in the watch band).",
+            ]
+            if worst:
+                lines.append(f"Largest shifts: {worst}.")
+            if data.get("features_missing_from_batch"):
+                lines.append(
+                    "Features absent from the batch: "
+                    + ", ".join(data["features_missing_from_batch"][:5])
+                    + " - a schema problem, not drift."
+                )
+            lines.append(
+                "PSI is computed on binned marginals with bin edges fixed at training time; "
+                "drift means the model is outside the data it was trained on, not that it is "
+                "necessarily wrong."
+            )
             return "\n".join(lines)
 
         if "markdown" in data and "backend" in data:

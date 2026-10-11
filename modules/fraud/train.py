@@ -40,6 +40,9 @@ class FraudModel:
     n_train: int = 0
     base_rate: float = 0.0
     notes: list[str] = field(default_factory=list)
+    #: Training distribution per feature, retained so incoming batches can be compared against
+    #: it. Drift detection is meaningless without a fixed reference frame.
+    reference: dict = field(default_factory=dict)
 
     def frame(self, payload: dict[str, Any]) -> pd.DataFrame:
         missing = [f for f in self.feature_names if f not in payload]
@@ -74,18 +77,25 @@ class FraudModel:
 
         path = Path(path) if path else Path(__file__).resolve().parents[2] / "artifacts" / "fraud" / "fraud_model.pkl"
         path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("wb") as fh:
-            pickle.dump(self, fh)
-        return path
+        from core.artifacts import save as _save_artifact
+
+        return _save_artifact(self, path)
 
     @classmethod
     def load(cls, path=None) -> "FraudModel":
-        import pickle
+        """Load a cached bundle, or raise so the caller retrains.
+
+        Delegates to core.artifacts, which stamps a schema number on every bundle. Without it a
+        field added later - `reference`, for drift detection - is silently absent from older
+        pickles: the artifact loads fine and then raises AttributeError the first time the new
+        field is touched, far from the change that caused it.
+        """
         from pathlib import Path
 
+        from core.artifacts import load as _load_artifact
+
         path = Path(path) if path else Path(__file__).resolve().parents[2] / "artifacts" / "fraud" / "fraud_model.pkl"
-        with path.open("rb") as fh:
-            return pickle.load(fh)  # noqa: S301 - trusted local artifact
+        return _load_artifact(path)
 
 
 def train_fraud(*, n: int = 20000, random_state: int = 7) -> tuple[FraudModel, MetricsReport]:
@@ -149,6 +159,8 @@ def train_fraud(*, n: int = 20000, random_state: int = 7) -> tuple[FraudModel, M
         n_train=len(X_fit),
         base_rate=float(y.mean()),
         notes=notes,
+        # The fit set, not the whole frame: this is the distribution the supervised model saw.
+        reference={f: np.asarray(X_fit[f].values, dtype=float) for f in FEATURES},
     )
 
     def combined(X: pd.DataFrame) -> np.ndarray:

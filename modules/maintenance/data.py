@@ -74,9 +74,28 @@ def synthesize(n_units: int = 100, max_cycles: int = 360, seed: int = 11) -> pd.
     """
     rng = np.random.default_rng(seed)
 
-    # Per-sensor fixed offset and scale, drawn once — this is what makes a sensor a sensor.
-    sensor_base = {s: float(rng.normal(0, 1) * 40 + 500) for s in SENSORS}
-    noise_std = {s: float(rng.uniform(1.0, 3.0)) for s in SENSORS}
+    # Sensor baselines and noise levels are properties of the *sensor*, so they are derived
+    # deterministically from the sensor's own name rather than drawn from `rng`.
+    #
+    # This was a real defect. Drawing them from the seeded generator meant two calls with
+    # different seeds produced datasets whose marginals were ~22 standard deviations apart, so
+    # a drift check comparing a fresh batch against the training data reported "significant
+    # shift" on data from the same fleet. Real CMAPSS sensors have fixed physical baselines —
+    # that stability is precisely what makes drift detectable — and a generator that moves them
+    # around per call cannot be used to test drift at all.
+    #
+    # A per-sensor hash keeps the values varied and realistic without making them seed-dependent.
+    def _sensor_seed(name: str) -> int:
+        import hashlib
+
+        return int(hashlib.sha256(name.encode()).hexdigest()[:8], 16)
+
+    sensor_base = {}
+    noise_std = {}
+    for s in SENSORS:
+        srng = np.random.default_rng(_sensor_seed(s))
+        sensor_base[s] = float(srng.normal(0, 1) * 40 + 500)
+        noise_std[s] = float(srng.uniform(1.0, 3.0))
 
     frames = []
     for unit in range(1, n_units + 1):

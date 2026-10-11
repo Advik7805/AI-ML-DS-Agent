@@ -26,13 +26,13 @@ and identity — while connecting to the hub through one shared contract.
 |---|---|---|---|
 | Churn & retention | `/churn` | real telecom, 834 held-out | PR-AUC **0.677** vs 0.145 → **4.67× lift** |
 | Fraud & anomaly | `/fraud` | synthetic, 5,000 held-out | PR-AUC **0.608** vs 0.010 → **59.6× lift**, FPR 0.0002 |
-| Predictive maintenance | `/maintenance` | synthetic CMAPSS-compatible | R² **0.840**, MAE 11.15 cycles (GroupKFold by engine) |
+| Predictive maintenance | `/maintenance` | synthetic CMAPSS-compatible | R² **0.816**, MAE 12.23 cycles (GroupKFold by engine) |
 | Dynamic pricing | `/pricing` | synthetic point-of-sale | 22/24 SKUs with identified elasticity |
 | Explainable diagnostics | `/diagnostics` | real Pima diabetes | ROC-AUC 0.690; fairness gap **0.208** flagged |
 | Knowledge RAG | `/rag` | 6-doc policy corpus | hit@1 **0.833**, 25 passages |
 | Web scraper | `/scraper` | mock by default | host-allowlisted, size-capped |
 
-**202 tests passing** (`python3 -m pytest -q`), across eight suites: contract conformance,
+**215 tests passing** (`python3 -m pytest -q`), across eight suites: contract conformance,
 per-body model quality, the gateway over HTTP, integrations, the LLM providers, explainer
 selection, experiment tracking and orchestration, and the churn body. **20 tools** register into
 one registry, names globally unique.
@@ -125,7 +125,7 @@ deploy/          API Dockerfile
 ```bash
 pip install -r requirements.txt
 bash data/fetch.sh                    # real dataset; optional — synthetic fallback works
-python -m pytest                      # 202 tests
+python -m pytest                      # 215 tests
 python -m modules.churn.train         # held-out metrics
 uvicorn apps.api.main:app --reload    # http://localhost:8000/docs
 ```

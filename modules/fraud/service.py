@@ -19,6 +19,7 @@ import pandas as pd
 from .data import FEATURES, synthesize
 from .train import FraudModel, train_fraud
 from core.explain import build_explainer
+import numpy as np
 
 ACCENT = "#f43f5e"
 
@@ -220,6 +221,21 @@ class FraudModule(Module):
                 },
             ),
             AgentTool(
+                name="check_fraud_drift",
+                description=(
+                    "Check whether recent transactions still look like the data the fraud model "
+                    "was trained on. Reports per-feature PSI and an overall verdict. Use this for "
+                    "'has the fraud feed drifted' or 'is the model still valid'."
+                ),
+                module_id=self.id,
+                parameters_schema={
+                    "type": "object",
+                    "properties": {
+                        "n": {"type": "integer", "description": "Batch size to sample."},
+                    },
+                },
+            ),
+            AgentTool(
                 name="get_fraud_model_metrics",
                 description="Held-out fraud model metrics, threshold, and methodology notes.",
                 module_id=self.id,
@@ -268,6 +284,33 @@ class FraudModule(Module):
             ),
             "top_flagged": sorted(flagged, key=lambda r: -r["risk"])[:5],
         }
+
+    def tool_check_fraud_drift(self, n: int = 400) -> dict[str, Any]:
+        """Compare a fresh batch of transactions against the distribution the model trained on.
+
+        A model that stays confident while its input distribution moves is the failure mode that
+        matters for a real-time fraud feed: nothing errors, the scores keep coming, and they
+        stop meaning what they meant at training time. PSI per feature is how that becomes
+        visible instead of silent.
+        """
+        from core.drift import drift_report
+
+        bundle = self.bundle
+        if not bundle.reference:
+            return {"error": "No training distribution retained; cannot assess drift."}
+
+        batch = synthesize(n=max(50, int(n)), seed=4242)
+        actual = {f: np.asarray(batch[f].values, dtype=float)
+                  for f in bundle.feature_names if f in batch.columns}
+
+        out = drift_report(bundle.reference, actual)
+        out["batch_size"] = len(batch)
+        out["reference_size"] = bundle.n_train
+        out["note"] = (
+            "Compared against the fit set the supervised model was trained on. Bin edges are cut "
+            "on that reference and never move, which is what makes the comparison meaningful."
+        )
+        return out
 
     def tool_get_fraud_model_metrics(self) -> dict[str, Any]:
         return self.evaluate().model_dump()

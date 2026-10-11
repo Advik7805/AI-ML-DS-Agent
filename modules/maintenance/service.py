@@ -38,6 +38,8 @@ class RulModel:
     source: str = "synthetic"
     trained_at: str = ""
     notes: list[str] = field(default_factory=list)
+    #: Training distribution per feature, so incoming telemetry can be checked for drift.
+    reference: dict = field(default_factory=dict)
 
     def frame(self, payload: dict[str, Any]) -> pd.DataFrame:
         missing = [f for f in self.feature_names if f not in payload]
@@ -52,16 +54,17 @@ class RulModel:
         import pickle
 
         path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("wb") as fh:
-            pickle.dump(self, fh)
-        return path
+        from core.artifacts import save as _save_artifact
+
+        return _save_artifact(self, path)
 
     @classmethod
     def load(cls, path: Path = ARTIFACT) -> "RulModel":
         import pickle
 
-        with path.open("rb") as fh:
-            return pickle.load(fh)  # noqa: S301 - trusted local artifact
+        from core.artifacts import load as _load_artifact
+
+        return _load_artifact(path)
 
 
 def train_rul(*, random_state: int = 11) -> tuple[RulModel, MetricsReport]:
@@ -121,6 +124,7 @@ def train_rul(*, random_state: int = 11) -> tuple[RulModel, MetricsReport]:
         source=source,
         trained_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         notes=notes,
+        reference={c: np.asarray(X[c].values, dtype=float) for c in feature_cols},
     )
 
     report = MetricsReport(
@@ -281,6 +285,21 @@ class MaintenanceModule(Module):
                 },
             ),
             AgentTool(
+                name="check_fleet_drift",
+                description=(
+                    "Check whether fresh engine telemetry still looks like the data the RUL model "
+                    "was trained on. Reports per-sensor PSI and an overall verdict. Use this for "
+                    "'has the fleet drifted' or 'is the maintenance model still valid'."
+                ),
+                module_id=self.id,
+                parameters_schema={
+                    "type": "object",
+                    "properties": {
+                        "n_engines": {"type": "integer", "description": "Engines to sample."},
+                    },
+                },
+            ),
+            AgentTool(
                 name="get_maintenance_model_metrics",
                 description="RUL model metrics by remaining-life band, plus methodology notes.",
                 module_id=self.id,
@@ -311,6 +330,33 @@ class MaintenanceModule(Module):
                 for i in order
             ],
         }
+
+    def tool_check_fleet_drift(self, n_engines: int = 20) -> dict[str, Any]:
+        """Compare fresh telemetry against the distribution the RUL model was trained on.
+
+        Fleet sensors drift for ordinary reasons - a new engine model, a recalibrated sensor, a
+        different operating profile - and the RUL model will keep producing confident cycle
+        counts regardless. This makes that visible instead of silent.
+        """
+        from core.drift import drift_report
+
+        bundle = self.bundle
+        if not bundle.reference:
+            return {"error": "No training distribution retained; cannot assess drift."}
+
+        fresh = synthesize(n_units=max(5, int(n_engines)), seed=999)
+        actual = {c: np.asarray(fresh[c].values, dtype=float)
+                  for c in bundle.feature_names if c in fresh.columns}
+
+        out = drift_report(bundle.reference, actual)
+        out["reference_source"] = bundle.source
+        out["reference_engines"] = int(bundle.metrics.get("n_engines", 0))
+        out["note"] = (
+            "Compared against the telemetry the model was trained on. A shift here is not "
+            "automatically a fault - the fleet may legitimately have changed - but the model's "
+            "error estimates no longer apply to it."
+        )
+        return out
 
     def tool_get_maintenance_model_metrics(self) -> dict[str, Any]:
         return self.evaluate().model_dump()

@@ -101,17 +101,18 @@ class ChurnModel:
 
         ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
         path = path or ARTIFACT_DIR / "churn_model.pkl"
-        with path.open("wb") as fh:
-            pickle.dump(self, fh)
-        return path
+        from core.artifacts import save as _save_artifact
+
+        return _save_artifact(self, path)
 
     @classmethod
     def load(cls, path: Path | None = None) -> "ChurnModel":
         import pickle
 
         path = path or ARTIFACT_DIR / "churn_model.pkl"
-        with path.open("rb") as fh:
-            return pickle.load(fh)  # noqa: S301 - trusted local artifact
+        from core.artifacts import load as _load_artifact
+
+        return _load_artifact(path)
 
 
 def train_churn(
