@@ -112,7 +112,12 @@ _TOOL_HINTS: list[tuple[str, str]] = [
      "get_churn_model_metrics"),
     (r"\b(fairness|bias|audit\w*|disparate|equit\w*|demographic)\b", "audit_model_fairness"),
     (r"\b(diabetes|patients?|clinical|glucose|hba1c|diagnos\w*|health risk)\b", "assess_diabetes_risk"),
-    (r"\b(engines?|turbofans?|fleets?|machines?|assets?)\b[\s\S]*\b(rank\w*|worst|urgent\w*|first|top|priorit\w*|which)\b",
+    # Dual lookaheads, not `a[\s\S]*b`. "rank engines by maintenance urgency" puts the verb
+    # *before* the noun, so an ordered pattern silently misses and the question falls through to
+    # rank_at_risk_customers on the bare word "rank" - a churn tool answering a maintenance
+    # question, which is worse than no answer.
+    (r"(?=[\s\S]*\b(engines?|turbofans?|fleets?|machines?|assets?)\b)"
+     r"(?=[\s\S]*\b(rank\w*|worst|urgent\w*|first|top|priorit\w*|which)\b)",
      "rank_engines_by_urgency"),
     (r"\b(rul|remaining useful life|turbofans?|predictive maintenance|engine health|fail\w* soon)\b", "predict_rul"),
     # Lookaheads rather than `a[\s\S]*b`: word order in a question is not fixed, and an
@@ -134,11 +139,14 @@ _TOOL_HINTS: list[tuple[str, str]] = [
     (r"\b(sources?|corpus|what.{0,12}indexed)\b", "list_knowledge_sources"),
     (r"\b(search\w*|knowledge|polic(?:y|ies)|refunds?|sla\b|what does|approv\w*|discount|playbook|privacy)\b",
      "search_knowledge"),
+    # Ahead of scrape_url, whose `scrape\w*` also matches "scraper" in "what can the scraper
+    # do". Left below it, a question *about* the scraper was answered by using it.
+    (r"\b(capabilit\w*|what can (?:you|the scraper|it)|allowlist|live scraping|what does the scraper)\b",
+     "scraper_capabilities"),
     (r"\b(scrape\w*|crawl\w*|fetch|urls?|websites?|competitor\w*|pages?)\b", "scrape_url"),
     (r"\b(metrics?|model cards?|pr-?auc|roc(?:-auc)?|thresholds?|evaluat\w*|how (?:good|well))\b",
      "get_churn_model_metrics"),
     (r"\b(fraud\w*|transactions?|suspicious|flag\w*)\b", "score_transaction"),
-    (r"\b(capabilit\w*|what can you|allowlist|live scraping)\b", "scraper_capabilities"),
 ]
 
 

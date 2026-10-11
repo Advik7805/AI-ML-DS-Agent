@@ -423,6 +423,17 @@ ROUTING_PROBES = [
     # Drift checks. These sit ahead of the body-scoped metrics patterns in _TOOL_HINTS:
     # "is the fraud model still valid?" contains both a body noun and a model noun, so without
     # that ordering it resolves to the metrics tool and the drift check is unreachable.
+    # Both of these shipped broken and were found by sweeping all 22 tools with one phrasing
+    # each, not by hand-picking probes.
+    #  * "rank engines by maintenance urgency" put the verb before the noun, so an ordered
+    #    `a[\s\S]*b` pattern missed and it fell through to a *churn* tool on the word "rank".
+    #  * "what can the scraper do" matched scrape_url's `scrape\w*` on the word "scraper", so a
+    #    question about the scraper was answered by using it.
+    ("rank engines by maintenance urgency", "rank_engines_by_urgency"),
+    ("which engines need maintenance first", "rank_engines_by_urgency"),
+    ("rank the worst engines", "rank_engines_by_urgency"),
+    ("what can the scraper do", "scraper_capabilities"),
+    ("rank the customers most at risk of churning", "rank_at_risk_customers"),
     ("has the fraud feed drifted?", "check_fraud_drift"),
     ("is the fraud model still valid?", "check_fraud_drift"),
     ("check drift on the transaction stream", "check_fraud_drift"),
