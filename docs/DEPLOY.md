@@ -26,8 +26,8 @@ serves the other six).
 
 1. Render dashboard → **New +** → **Blueprint** → point it at this repo.
 2. It reads [`render.yaml`](../render.yaml), which already declares the service, the Dockerfile
-   path, `/health` as the health check, and all 18 env vars.
-3. Render will prompt for the eight secrets marked `sync: false`. **Leave them blank.** Every one
+   path, `/health` as the health check, and all 26 env vars.
+3. Render will prompt for the 12 secrets marked `sync: false`. **Leave them blank.** Every one
    has a labelled mock fallback.
 4. Deploy. You get something like `https://saros-api.onrender.com`.
 
