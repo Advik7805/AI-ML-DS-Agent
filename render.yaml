@@ -46,6 +46,20 @@ services:
 
       # Optional. Jina Reader's anonymous endpoint works with no key at ~20 req/min; a free
       # key (10M tokens, no card) raises that to 500 RPM.
+      # Optional overrides. Sensible defaults exist for all of them.
+      - key: GROQ_MODEL
+        sync: false
+      - key: GEMINI_MODEL
+        sync: false
+      # Requests per client per path, per window. In-memory unless Upstash is configured,
+      # so this is per-process on a single free instance.
+      - key: SAROS_RATE_LIMIT
+        value: "60"
+      - key: SAROS_RATE_WINDOW
+        value: "60"
+      # Local run log. Ephemeral on Render - set MLFLOW_TRACKING_URI for durable history.
+      - key: SAROS_RUNS_FILE
+        value: artifacts/runs.jsonl
       - key: JINA_API_KEY
         sync: false
       # Optional. Leave unset and training runs go to artifacts/runs.jsonl instead.
