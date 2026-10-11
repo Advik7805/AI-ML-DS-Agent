@@ -28,10 +28,25 @@ fetch_github_file() {
     fi
   fi
   echo "  -> $repo :: $path"
-  curl -fsSL "https://api.github.com/repos/${repo}/contents/${path}" \
-    -H "Accept: application/vnd.github+json" |
-    python3 -c 'import json,sys,base64; sys.stdout.buffer.write(base64.b64decode(json.load(sys.stdin)["content"]))' \
-    > "$dest"
+  # Deliberately python3 and not curl. The API image is python:3.11-slim, which ships wget but
+  # NOT curl, so a curl-based fetch fails inside the Docker build — and because the Dockerfile
+  # runs this script as `... || echo "skipped"`, that failure is silent: the image trains on
+  # synthetic fallbacks while claiming the real dataset is baked in. python3 is the one thing
+  # guaranteed present in a Python image, so the fetch cannot depend on anything else.
+  python3 - "$repo" "$path" "$dest" <<'PY'
+import base64, json, sys, urllib.request
+
+repo, path, dest = sys.argv[1:4]
+url = f"https://api.github.com/repos/{repo}/contents/{path}"
+req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json"})
+with urllib.request.urlopen(req, timeout=120) as resp:
+    payload = json.load(resp)
+if "content" not in payload:
+    raise SystemExit(f"github contents API returned no content for {repo}/{path}: "
+                     f"{payload.get('message', payload)}")
+with open(dest, "wb") as fh:
+    fh.write(base64.b64decode(payload["content"]))
+PY
 
   # Guard against Git LFS pointers. The blob API does not bypass LFS, so a repo that stores the
   # CSV through LFS hands back a 132-byte pointer that *looks* like a file. Reading one as data
