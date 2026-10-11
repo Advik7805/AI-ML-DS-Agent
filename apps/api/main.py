@@ -222,6 +222,29 @@ def integrations() -> dict[str, Any]:
     return summary()
 
 
+@app.get("/api/v1/runs")
+def runs(limit: int = 20, body: str | None = None) -> dict[str, Any]:
+    """Experiment tracking: which run produced the model that is currently loaded.
+
+    Seven bodies, each selecting an estimator by a metric, makes "which training run is live"
+    unanswerable without a log. This reads it. Backed by MLflow when `MLFLOW_TRACKING_URI` is
+    set, otherwise by a local JSONL file — `status.backend` says which, so the answer is never
+    a guess.
+
+    Render's free filesystem is ephemeral, so the JSONL log does not survive a redeploy. That is
+    stated in the response rather than left to be discovered.
+    """
+    from core.tracking import recent_runs, status
+
+    st = status()
+    if st["backend"] == "jsonl":
+        st["warning"] = (
+            "Local JSONL log on an ephemeral filesystem — runs are lost on redeploy. Set "
+            "MLFLOW_TRACKING_URI to keep history across deploys. " + (st.get("warning") or "")
+        ).strip()
+    return {"status": st, "runs": recent_runs(limit=limit, body=body)}
+
+
 # --- agent surface ------------------------------------------------------------
 
 

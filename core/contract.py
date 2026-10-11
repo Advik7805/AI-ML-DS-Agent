@@ -16,6 +16,7 @@ Rules enforced by CI (see ``tests/test_contract.py``):
 
 from __future__ import annotations
 
+import functools
 import importlib
 import pkgutil
 from abc import ABC, abstractmethod
@@ -34,6 +35,47 @@ class Module(ABC):
 
     #: Filled by the concrete module. Used as the registry key.
     id: str = ""
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Wrap any subclass `train` so every training run is recorded automatically.
+
+        Done here rather than in each body for one reason: a body added later cannot forget it.
+        The alternative is six call sites and a seventh that silently never gets tracked, which
+        is how you end up with a run log that lies by omission.
+
+        Tracking never raises, and `log_run` degrades to a local JSONL file when MLflow is not
+        configured, so this cannot turn a working `train()` into a failing one.
+        """
+        super().__init_subclass__(**kwargs)
+
+        base_train = Module.train
+        own = cls.__dict__.get("train")
+        if own is None or own is base_train:
+            return
+
+        @functools.wraps(own)
+        def tracked(self: "Module", config: dict[str, Any] | None = None) -> MetricsReport:
+            import time as _time
+
+            t0 = _time.perf_counter()
+            report = own(self, config)
+            try:
+                from core.tracking import log_run
+
+                log_run(
+                    self.id,
+                    metrics={**report.scores, "n_samples": report.n_samples,
+                             "positive_rate": report.positive_rate,
+                             "train_seconds": round(_time.perf_counter() - t0, 3)},
+                    params={"threshold": report.threshold, "group_basis": report.group_basis,
+                            **(config or {})},
+                    tags={"source": getattr(self, "source", "") or ""},
+                )
+            except Exception:  # noqa: BLE001 - tracking must never break training
+                pass
+            return report
+
+        cls.train = tracked  # type: ignore[method-assign]
 
     @property
     @abstractmethod

@@ -1,0 +1,22 @@
+# Optional: MLflow experiment tracking.
+#
+# Deliberately NOT part of requirements.txt. mlflow and its dependency tree are ~100 MB, and the
+# API runs on a 512 MB free container with a ~60s cold start — that is not a rounding error.
+# Tracking already works without this file: every run is appended to artifacts/runs.jsonl.
+#
+# Install this only if you are running an MLflow server (locally, or on a separate host) and
+# want the runs there too:
+#
+#     pip install -r requirements-mlflow.txt
+#     export MLFLOW_TRACKING_URI=http://localhost:5000
+#
+# Set MLFLOW_TRACKING_URI and core/tracking.py sends runs to MLflow as well as the local log.
+# If the server is unreachable, log_run() records the error and returns — an unreachable tracker
+# must never fail a training run.
+#
+# Free ways to run a server:
+#   - `mlflow server --host 0.0.0.0` on any box you already have
+#   - Dagster/MLflow cloud free tiers
+#   - Render free (but it sleeps, and tracking is write-mostly, so this is a poor fit)
+
+mlflow>=2.16,<3
