@@ -34,6 +34,8 @@ import numpy as np
 from core.contract import Module
 from core.integrations.firecrawl import capabilities as firecrawl_capabilities
 from core.integrations.firecrawl import get_client as get_firecrawl_client
+from core.integrations.jina import capabilities as jina_capabilities
+from core.integrations.jina import get_client as get_jina_client
 from core.integrations.tavily import capabilities, get_client
 from core.types import AgentTool, Explanation, MetricsReport, ModuleManifest, Prediction
 
@@ -407,7 +409,19 @@ class ScraperModule(Module):
         target = str(url).strip()
         if not target.startswith(("http://", "https://")):
             raise ValueError(f"url must be absolute http(s), got {target!r}")
-        client = get_firecrawl_client()
+        # Jina first: it works with no key at all, so rendering is never dead-on-arrival in
+        # production. Firecrawl only when explicitly configured, because its 500 credits are
+        # one-time and spending them on something free elsewhere is a bad trade.
+        #
+        # Both are gated on SAROS_SCRAPER_LIVE, the same flag that governs every other outbound
+        # fetch here. Without that gate a unit test - or a laptop with no egress - would make a
+        # real network call and fail, and "it works in prod but not in CI" is exactly the sort of
+        # asymmetry that wastes an afternoon.
+        firecrawl = get_firecrawl_client()
+        if not _config().live:
+            client = firecrawl  # labelled "[mock]", never silent
+        else:
+            client = firecrawl if firecrawl.backend != "mock" else get_jina_client()
         try:
             out = client.scrape(target, wait_for=int(wait_for or 0))
         except Exception as exc:  # noqa: BLE001 - degrade, never break the conversation
@@ -440,9 +454,13 @@ class ScraperModule(Module):
             # JavaScript) and Tavily (renders JS, not allowlisted, costs credits).
             "tavily": tavily,
             "firecrawl": firecrawl_capabilities(),
+            # Jina is the default renderer because it needs no key at all, so this is the one
+            # path that works on a fresh deploy with zero configuration.
+            "jina": jina_capabilities(),
             "production_backend": (
-                "Tavily extract and Firecrawl scrape are both wired; pick by whether the page "
-                "needs a browser and which free allowance you are spending."
+                "render_url uses Jina Reader by default (free, no key, ~20 req/min) and switches "
+                "to Firecrawl only if it is explicitly configured, because Firecrawl's 500 "
+                "credits are one-time. Tavily covers search and multi-URL extract."
             ),
         }
 

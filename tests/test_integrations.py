@@ -407,3 +407,196 @@ def test_corpus_provenance_is_reported(registry) -> None:
     assert "corpus" in out
     assert out["corpus"]["external_backend"] in ("none", "supabase")
     assert out["n_documents"] >= 6, "the in-repo corpus must always be present"
+
+
+# --- Jina Reader: the keyless default renderer --------------------------------
+
+
+def test_jina_works_with_no_key_at_all() -> None:
+    """The whole point: rendering is never dead-on-arrival on a fresh deploy."""
+    from core.integrations import jina
+
+    jina.reset_client()
+    client = jina.JinaReader("")
+    assert client.backend == "jina-anonymous"
+    assert client.live is True
+    caps = jina.capabilities()
+    assert caps["keyless"] is True
+    assert "20 req/min" in caps["rate_limit"]
+
+
+def test_jina_key_raises_throughput(monkeypatch) -> None:
+    from core.integrations import jina
+
+    jina.reset_client()
+    monkeypatch.setenv("JINA_API_KEY", "jina-secret")
+    client = jina.get_client(force_reset=True)
+    assert client.backend == "jina"
+    assert "500 req/min" in jina.capabilities()["rate_limit"]
+    jina.reset_client()
+
+
+def test_jina_sends_the_headers_it_documents(monkeypatch) -> None:
+    from core.integrations.jina import JinaReader
+
+    seen: dict = {}
+
+    class FakeResp:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"data": {"title": "T", "url": "https://x.test", "content": "# Hello",
+                             "statusCode": 200}}
+
+    def fake_get(url, **kw):
+        seen["url"] = url
+        seen["headers"] = kw["headers"]
+        return FakeResp()
+
+    import httpx
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+    out = JinaReader("").scrape("https://x.test/page")
+
+    assert seen["url"] == "https://r.jina.ai/https://x.test/page"
+    assert seen["headers"]["Accept"] == "application/json"
+    assert seen["headers"]["X-Respond-With"] == "markdown"
+    assert "Authorization" not in seen["headers"], "no key means no auth header"
+    assert out["markdown"] == "# Hello"
+    assert out["title"] == "T"
+    assert out["backend"] == "jina-anonymous"
+
+
+def test_jina_key_is_sent_as_bearer(monkeypatch) -> None:
+    from core.integrations.jina import JinaReader
+
+    seen: dict = {}
+
+    class FakeResp:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"data": {"content": "x"}}
+
+    import httpx
+
+    def fake_get(url, **kw):
+        seen["headers"] = kw["headers"]
+        return FakeResp()
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+    JinaReader("jina-secret").scrape("https://x.test")
+    assert seen["headers"]["Authorization"] == "Bearer jina-secret"
+
+
+def test_jina_rate_limit_is_explained_not_raised_raw(monkeypatch) -> None:
+    """A 429 on the anonymous tier is expected; the message must say how to fix it."""
+    import httpx
+
+    from core.integrations.jina import JinaReader
+
+    class FakeResp:
+        status_code = 429
+
+        def raise_for_status(self):
+            raise httpx.HTTPStatusError("429", request=None, response=None)
+
+        def json(self):
+            return {}
+
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: FakeResp())
+    with pytest.raises(RuntimeError) as ei:
+        JinaReader("").scrape("https://x.test")
+    assert "JINA_API_KEY" in str(ei.value)
+
+
+def test_jina_plain_text_fallback_strips_the_header_block(monkeypatch) -> None:
+    """Non-JSON mode returns Title:/URL Source:/Markdown Content:; parse it, don't dump it."""
+    import httpx
+
+    from core.integrations.jina import JinaReader
+
+    class FakeResp:
+        status_code = 200
+        text = "Title: T\nURL Source: https://x.test\nMarkdown Content:\n\n# Body here\n"
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            raise ValueError("not json")
+
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: FakeResp())
+    out = JinaReader("").scrape("https://x.test")
+    assert out["markdown"] == "# Body here"
+
+
+def test_render_url_defaults_to_jina_not_firecrawl(registry, monkeypatch) -> None:
+    """Firecrawl's 500 credits are one-time; the free path must be the default.
+
+    Verified against the selection logic with the transport stubbed, because the point is which
+    backend is *chosen*, not whether r.jina.ai is reachable from the test runner.
+    """
+    import httpx
+
+    from core.integrations import firecrawl, jina
+
+    monkeypatch.setenv("SAROS_SCRAPER_LIVE", "1")
+    jina.reset_client()
+    assert jina.get_client().backend.startswith("jina")
+    assert firecrawl.get_client().backend == "mock", "firecrawl must be off unless configured"
+
+    chosen: dict = {}
+
+    class FakeResp:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"data": {"content": "rendered", "title": "T", "url": "https://x.test"}}
+
+    def fake_get(url, **kw):
+        chosen["url"] = url
+        return FakeResp()
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+    out = registry.get("scraper").call_tool("render_url", {"url": "https://x.test"})
+    assert chosen["url"].startswith("https://r.jina.ai/"), "Jina must be the default renderer"
+    assert out["backend"] == "jina-anonymous"
+    assert out["live"] is True
+    assert out["markdown"] == "rendered"
+
+    caps = registry.get("scraper").call_tool("scraper_capabilities", {})
+    assert caps["jina"]["keyless"] is True
+    assert caps["firecrawl"]["live"] is False
+
+
+def test_render_url_stays_offline_without_the_scraper_flag(registry, monkeypatch) -> None:
+    """No outbound fetch unless SAROS_SCRAPER_LIVE is set - same rule as every other fetcher.
+
+    Without this gate, a unit test on a machine with no egress makes a real network call and
+    fails, and "works in prod, broken in CI" is exactly the asymmetry that wastes an afternoon.
+    """
+    import httpx
+
+    from core.integrations import jina
+
+    monkeypatch.delenv("SAROS_SCRAPER_LIVE", raising=False)
+    jina.reset_client()
+
+    def explode(*a, **k):
+        raise AssertionError("render_url must not touch the network when the flag is off")
+
+    monkeypatch.setattr(httpx, "get", explode)
+    out = registry.get("scraper").call_tool("render_url", {"url": "https://x.test"})
+    assert out["backend"] == "mock"
+    assert out["live"] is False
+    assert out["markdown"].startswith("[mock]")
