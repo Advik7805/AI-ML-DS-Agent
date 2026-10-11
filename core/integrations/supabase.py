@@ -15,7 +15,8 @@ trip that buys nothing over TF-IDF, and it would add an embedding dependency to 
 currently has none. The table stores plain text and the existing TF-IDF ranking still runs in
 process. Revisit if the corpus grows past a few hundred passages.
 
-Schema:
+Schema: run `deploy/supabase_schema.sql` in the Supabase SQL editor. It is idempotent and
+seeds one verifiable row. The definition, for reference:
 
     create table knowledge_documents (
       id         bigint generated always as identity primary key,

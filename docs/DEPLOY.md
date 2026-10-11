@@ -111,8 +111,11 @@ Suggested order, best value first:
 4. **Firecrawl.** Almost certainly skip it. Jina already renders JavaScript for free, and
    Firecrawl's 500 credits never refill. It only earns its place if you need its crawl, sitemap
    or structured-extract endpoints.
-5. **Supabase.** Only if you want to add knowledge-base documents without redeploying. It is a
-   plain-text document table, *not* a vector store — at 25 passages TF-IDF already retrieves
+5. **Supabase.** Only if you want to add knowledge-base documents without redeploying. First run
+   [`deploy/supabase_schema.sql`](../deploy/supabase_schema.sql) in the Supabase SQL editor — it
+   is idempotent and seeds one row you can verify against
+   `GET /api/v1/agent/tools/list_knowledge_sources` (which reports `external_live`). Then set the
+   three env vars above. It is a plain-text document table, *not* a vector store — at 25 passages TF-IDF already retrieves
    correctly and pgvector would add a round trip and an embedding dependency for nothing. Create
    the table with the schema at the top of `core/integrations/supabase.py`; the in-repo six
    documents always load regardless, and a database outage degrades to them rather than to an
