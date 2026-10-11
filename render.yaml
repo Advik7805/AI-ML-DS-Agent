@@ -44,6 +44,14 @@ services:
       - key: SAROS_SCRAPER_ALLOW
         value: ""                   # empty => all live fetches blocked
 
+      # Optional. Jina Reader's anonymous endpoint works with no key at ~20 req/min; a free
+      # key (10M tokens, no card) raises that to 500 RPM.
+      - key: JINA_API_KEY
+        sync: false
+      # Optional. Leave unset and training runs go to artifacts/runs.jsonl instead.
+      # Note Render's filesystem is ephemeral, so the JSONL log does not survive a redeploy.
+      - key: MLFLOW_TRACKING_URI
+        sync: false
       - key: FIRECRAWL_API_KEY
         sync: false
       - key: SAROS_FIRECRAWL_LIVE

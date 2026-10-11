@@ -37,6 +37,13 @@ venv/
 data/raw/
 data/*.csv
 
+# --- generated artifacts: trained at runtime, never shipped ---------------------
+# These are pickled models, regenerated on first use. Baking them in would mean the image
+# carries a model trained on whoever's laptop built it - which is exactly the provenance
+# problem data/fetch.sh exists to avoid. They also add ~10 MB to every build upload.
+artifacts/
+*.pkl
+
 # --- local environment: must never be baked into an image ----------------------
 # Secrets belong in the platform's env var store, not in a layer that anyone who can pull the
 # image can read.

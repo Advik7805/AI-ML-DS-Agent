@@ -13,11 +13,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
-COPY requirements.txt .
+COPY requirements.txt requirements-mlflow.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY core/ core/
 COPY modules/ modules/
+COPY flows/ flows/
 COPY apps/ apps/
 COPY data/fetch.sh data/
 COPY pyproject.toml .
