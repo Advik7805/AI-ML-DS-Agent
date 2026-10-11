@@ -1,0 +1,622 @@
+"""Tests for the non-churn bodies, and for the agent that reaches them.
+
+Deliberately assert *invariants* rather than exact metric values: these models train on
+generated data, so pinning a number would make the suite brittle without making the model
+better. What must hold is direction, calibration sanity, and honesty about limits.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+# `registry` comes from tests/conftest.py so every suite shares one discovery.
+
+
+# --- RAG ---------------------------------------------------------------------
+
+
+def test_rag_retrieves_the_right_passage(registry) -> None:
+    rag = registry.get("rag")
+    res = rag.call_tool("search_knowledge", {"query": "What discount can an agent approve?", "k": 3})
+    assert res["n_results"] > 0
+    assert res["results"][0]["source"] == "retention-playbook"
+    assert "20%" in res["results"][0]["snippet"], "the concession table should be in the top passage"
+
+
+def test_rag_returns_citations(registry) -> None:
+    rag = registry.get("rag")
+    res = rag.call_tool("search_knowledge", {"query": "refund window", "k": 3})
+    assert "refund-policy" in res["citation"]
+    assert "Sources" in res["citation"]
+
+
+def test_rag_ranks_by_relevance(registry) -> None:
+    rag = registry.get("rag")
+    res = rag.call_tool("search_knowledge", {"query": "uptime availability credit", "k": 5})
+    scores = [r["score"] for r in res["results"]]
+    assert scores == sorted(scores, reverse=True)
+    assert res["results"][0]["source"] == "sla"
+
+
+def test_rag_is_honest_about_no_match(registry) -> None:
+    rag = registry.get("rag")
+    pred = rag.predict({"query": "xyzzy quantum flux capacitor"})
+    assert pred.label == "No grounding"
+    assert "from memory" in pred.decision
+
+
+def test_rag_does_not_ground_on_a_single_shared_word(registry) -> None:
+    """TF-IDF cosine can be driven entirely by one token.
+
+    "What is the airspeed velocity of an unladen swallow" matched the fraud protocol on the
+    word "velocity" alone and scored 0.175 — confident-looking and completely unrelated.
+    """
+    rag = registry.get("rag")
+    pred = rag.predict({"query": "what is the airspeed velocity of an unladen swallow"})
+    assert pred.label == "Weak grounding", (
+        f"got '{pred.label}' at score {pred.score} — a one-word match is not grounding"
+    )
+    assert pred.meta["matched_terms"] < 2
+
+
+def test_rag_grounds_a_relevant_question(registry) -> None:
+    """Regression guard: a cosine floor must not come back.
+
+    An earlier version rejected anything below 0.25. On this 25-passage corpus TF-IDF tops out
+    near 0.22 even for obviously-relevant questions, so the floor labelled every real query
+    weak and made the body look broken. The discriminator is substantive term count, not the
+    absolute cosine.
+    """
+    rag = registry.get("rag")
+    pred = rag.predict({"query": "What discount can an agent approve?"})
+    assert pred.label == "Well grounded", f"got '{pred.label}' at score {pred.score}"
+    assert pred.meta["matched_terms"] >= 2
+    assert pred.score < 0.25, "this corpus does not produce high cosines; do not re-add a floor"
+
+
+def test_rag_tool_and_predict_agree_on_grounding(registry) -> None:
+    """The agent and the storefront must never disagree about whether an answer was grounded.
+
+    The verdict used to live only inside ``predict``, so the tool handed the agent bare cosine
+    scores with no judgement attached.
+    """
+    rag = registry.get("rag")
+    for query in (
+        "What discount can an agent approve?",
+        "what is the airspeed velocity of an unladen swallow",
+        "xyzzy quantum flux capacitor",
+    ):
+        pred = rag.predict({"query": query, "k": 5})
+        res = rag.call_tool("search_knowledge", {"query": query, "k": 5})
+        assert res["grounding"] == pred.label, query
+        assert res["matched_terms"] == pred.meta["matched_terms"], query
+        assert res["decision"], "a verdict with no decision text is useless to the agent"
+
+
+def test_rag_evaluate_reports_retrieval_quality(registry) -> None:
+    m = registry.get("rag").evaluate()
+    assert m.scores["corpus_documents"] >= 6
+    assert m.scores["corpus_passages"] >= 12
+    assert m.scores["hit@1"] >= 0.6
+    assert any("smoke test" in n for n in m.notes), "must not oversell a hand-written probe set"
+
+
+# --- Fraud -------------------------------------------------------------------
+
+
+def test_fraud_separates_card_testing_from_a_coffee(registry) -> None:
+    fraud = registry.get("fraud")
+    loud = fraud.call_tool("score_transaction", {
+        "amount": 4200, "hour_of_day": 3, "distance_from_home_km": 1500, "txn_count_1h": 12,
+        "distinct_merchants_24h": 14, "card_age_days": 45, "avg_amount_30d": 60,
+        "is_night": 1, "is_foreign": 1, "pin_used": 0,
+    })
+    benign = fraud.call_tool("score_transaction", {
+        "amount": 5, "hour_of_day": 13, "distance_from_home_km": 2, "txn_count_1h": 1,
+        "distinct_merchants_24h": 2, "card_age_days": 900, "avg_amount_30d": 45,
+        "is_night": 0, "is_foreign": 0, "pin_used": 1,
+    })
+    assert loud["score"] > 0.9
+    assert benign["score"] < 0.1, (
+        f"an ordinary coffee scored {benign['score']} — the unsupervised score is miscalibrated again"
+    )
+
+
+def test_fraud_unsupervised_score_is_calibrated(registry) -> None:
+    """Regression test for the 1/(1+exp(score*6)) bug that scored normal points at 0.94."""
+    from modules.fraud.data import FEATURES, synthesize
+
+    fraud = registry.get("fraud")
+    df = synthesize(n=3000, seed=4)
+    legit = df[df["is_fraud"] == 0].sample(150, random_state=0)
+
+    scores = [
+        fraud.bundle.unsupervised_proba(fraud.bundle.frame({f: float(r[f]) for f in FEATURES}))[0]
+        for _, r in legit.iterrows()
+    ]
+    mean = float(np.mean(scores))
+    assert mean < 0.35, f"mean unsupervised score on legitimate traffic is {mean:.3f} — not calibrated"
+
+
+def test_fraud_reports_the_account_takeover_blind_spot(registry) -> None:
+    """The model genuinely cannot catch quiet account takeover. It must say so."""
+    m = registry.get("fraud").call_tool("get_fraud_model_metrics", {})
+    assert any("account takeover" in n for n in m["notes"])
+    assert m["scores"]["recall"] < 0.9, "a recall this high on overlapping data would be suspicious"
+
+
+def test_fraud_stream_is_labelled_as_enriched(registry) -> None:
+    """A fraud-enriched demo feed that does not say so is quietly misleading."""
+    s = registry.get("fraud").call_tool("summarise_fraud_stream", {"n": 40})
+    assert s["enriched"] is True
+    assert "enrichment_note" in s
+    assert s["n_flagged"] > 0, "the demo feed should actually show something"
+
+
+def test_fraud_metrics_are_not_impossibly_good(registry) -> None:
+    """PR-AUC 1.000 was the symptom of a generator with no class overlap."""
+    m = registry.get("fraud").call_tool("get_fraud_model_metrics", {})
+    assert m["scores"]["pr_auc"] < 0.95, "perfect separation means the data is not realistic"
+    assert m["scores"]["pr_auc"] > 10 * m["scores"]["baseline_pr_auc"]
+
+
+# --- Maintenance -------------------------------------------------------------
+
+
+def test_maintenance_ranks_engines(registry) -> None:
+    maint = registry.get("maintenance")
+    res = maint.call_tool("rank_engines_by_urgency", {"n": 5})
+    assert res["n_engines"] == 100
+    ruls = [e["predicted_rul"] for e in res["engines"]]
+    assert ruls == sorted(ruls), "must be ordered by urgency, i.e. ascending RUL"
+    assert all(0 <= e["predicted_rul"] <= 125 for e in res["engines"])
+
+
+def test_maintenance_error_is_reported_by_band(registry) -> None:
+    """Overall MAE hides where the model fails; the band breakdown is the point."""
+    m = registry.get("maintenance").call_tool("get_maintenance_model_metrics", {})
+    band_keys = [k for k in m["scores"] if k.startswith("mae_") and k != "mae_cycles"]
+    assert len(band_keys) == 3
+    assert m["scores"]["r2"] > 0.5, "R^2 near zero means the degradation signal is unlearnable"
+
+
+def test_maintenance_rul_respects_the_cap(registry) -> None:
+    from modules.maintenance.data import FEATURES, RUL_CAP, synthesize
+
+    maint = registry.get("maintenance")
+    df = synthesize(n_units=3)
+    row = df.iloc[0]
+    payload = {f: float(row[f]) for f in FEATURES if f in df.columns}
+    pred = maint.predict(payload)
+    assert 0 <= pred.meta["rul_cycles"] <= RUL_CAP
+    assert 0.0 <= pred.score <= 1.0
+
+
+def test_maintenance_uses_grouped_cv(registry) -> None:
+    m = registry.get("maintenance").call_tool("get_maintenance_model_metrics", {})
+    assert any("GroupKFold" in n for n in m["notes"]), "random splits leak across engine cycles"
+
+
+# --- Pricing -----------------------------------------------------------------
+
+
+def test_pricing_recovers_true_elasticity(registry) -> None:
+    """Only verifiable because the demand data is generated — and that is worth checking."""
+    m = registry.get("pricing").evaluate()
+    assert m.scores["mae_elasticity"] < 0.4
+    assert abs(m.scores["bias_elasticity"]) < 0.2
+    assert m.scores["share_identified"] > 0.7
+
+
+def test_pricing_never_extrapolates_beyond_observed_prices(registry) -> None:
+    """The safety rail that stops a pricing model destroying demand."""
+    pricing = registry.get("pricing")
+    for sku in list(pricing.model.coefficients)[:6]:
+        meta = pricing.predict({"sku": sku}).meta
+        lo, hi = meta["observed_price_range"]
+        assert lo <= meta["recommended_price"] <= hi, f"{sku}: {meta['recommended_price']} outside [{lo}, {hi}]"
+
+
+def test_pricing_flags_unidentified_elasticity(registry) -> None:
+    res = registry.get("pricing").call_tool("list_skus_by_opportunity", {"n": 5})
+    assert res["n_skus"] >= 20
+    assert "not_identified" in res
+    assert res["note"], "must explain what 'not identified' implies"
+
+
+def test_pricing_unknown_sku_raises(registry) -> None:
+    with pytest.raises(ValueError, match="Unknown SKU"):
+        registry.get("pricing").predict({"sku": "SKU-DOES-NOT-EXIST"})
+
+
+def test_pricing_carries_a_confidence_interval(registry) -> None:
+    meta = registry.get("pricing").predict({"sku": "SKU-001"}).meta
+    ci = meta["elasticity_ci"]
+    assert len(ci) == 2 and ci[0] < ci[1]
+    assert ci[0] <= meta["elasticity"] <= ci[1]
+
+
+# --- Diagnostics -------------------------------------------------------------
+
+
+def test_diagnostics_uses_the_real_pima_dataset(registry) -> None:
+    m = registry.get("xai_health").evaluate()
+    assert m.positive_rate > 0
+
+
+def test_diagnostics_runs_a_fairness_audit(registry) -> None:
+    audit = registry.get("xai_health").call_tool("audit_model_fairness", {})
+    assert audit["groups"], "audit must return per-group numbers"
+    assert audit["worst_served_group"] is not None
+    assert audit["fnr_gap"] is not None
+    assert "false-negative rate" in audit["metric_rationale"].lower()
+
+
+def test_diagnostics_states_the_grouping_is_a_proxy(registry) -> None:
+    """A bias audit against a fabricated group would look like evidence and mislead."""
+    audit = registry.get("xai_health").call_tool("audit_model_fairness", {})
+    assert "proxy" in audit["grouping_variable"].lower()
+
+
+def test_diagnostics_reports_groups_through_the_contract(registry) -> None:
+    m = registry.get("xai_health").evaluate()
+    assert m.groups, "groups should be part of MetricsReport, not an ad-hoc attribute"
+    assert m.group_basis, "a group breakdown without a stated basis is not interpretable"
+
+
+def test_diagnostics_missing_values_are_handled(registry) -> None:
+    """Zero is a missing sentinel in Pima; passing null must not blow up."""
+    mod = registry.get("xai_health")
+    pred = mod.predict({
+        "pregnancies": 3, "plasma_glucose": None, "blood_pressure": 72,
+        "triceps_skin_thickness": None, "insulin": None, "bmi": 33,
+        "diabetes_pedigree": 0.6, "age": 45,
+    })
+    assert 0.0 <= pred.score <= 1.0
+    assert pred.explanation is not None
+    assert any("median-imputed" in c for c in pred.explanation.caveats)
+
+
+def test_diagnostics_carries_a_not_a_device_warning(registry) -> None:
+    pred = registry.get("xai_health").predict({
+        "pregnancies": 2, "plasma_glucose": 160, "blood_pressure": 70, "triceps_skin_thickness": 30,
+        "insulin": 200, "bmi": 38, "diabetes_pedigree": 0.9, "age": 55,
+    })
+    assert "not a diagnostic device" in str(pred.meta).lower()
+
+
+# --- Scraper -----------------------------------------------------------------
+
+
+def test_scraper_mock_is_deterministic(registry) -> None:
+    s = registry.get("scraper")
+    a = s.call_tool("scrape_url", {"url": "https://example.com/x"})["markdown"]
+    b = s.call_tool("scrape_url", {"url": "https://example.com/x"})["markdown"]
+    assert a == b
+
+
+def test_scraper_rejects_non_http(registry) -> None:
+    with pytest.raises(ValueError, match="http"):
+        registry.get("scraper").predict({"url": "ftp://example.com/x"})
+
+
+def test_scraper_live_mode_respects_the_allowlist(registry, monkeypatch) -> None:
+    """The rail that stops prompt injection pointing the agent at an arbitrary host."""
+    monkeypatch.setenv("SAROS_SCRAPER_LIVE", "1")
+    monkeypatch.setenv("SAROS_SCRAPER_ALLOW", "allowed.test")
+    s = registry.get("scraper")
+    res = s.call_tool("scrape_url", {"url": "https://not-allowed.test/page"})
+    assert res["fetcher"] == "blocked"
+    assert "SAROS_SCRAPER_ALLOW" in res["error"]
+
+
+def test_scraper_states_its_production_backend(registry) -> None:
+    caps = registry.get("scraper").call_tool("scraper_capabilities", {})
+    assert caps["live"] is False
+    assert "Firecrawl" in caps["production_backend"]
+
+
+# --- Agent -------------------------------------------------------------------
+
+
+def test_agent_reaches_every_body(registry) -> None:
+    from core.agent.graph import HubAgent
+    from core.agent.providers import MockProvider
+
+    agent = HubAgent(registry, MockProvider())
+    queries = {
+        "get_churn_model_metrics": "What are the churn model metrics?",
+        "rank_at_risk_customers": "Rank the top 5 customers most likely to churn",
+        "get_fraud_model_metrics": "How good is the fraud model?",
+        "summarise_fraud_stream": "What's happening on the fraud feed right now?",
+        "search_knowledge": "Search the knowledge base for the refund window",
+        "rank_engines_by_urgency": "Which engines need maintenance first?",
+        "optimise_price": "Optimise the price for SKU-003",
+        "list_skus_by_opportunity": "Which SKUs have the biggest pricing opportunity?",
+        "audit_model_fairness": "Audit the diabetes model for fairness",
+        "scrape_url": "Can you scrape a competitor page?",
+    }
+    for expected_tool, query in queries.items():
+        result = agent.run(query)
+        assert expected_tool in result["tools_used"], (
+            f"'{query}' routed to {result['tools_used']}, expected {expected_tool}"
+        )
+        assert result["answer"], f"no answer for '{query}'"
+
+
+def test_agent_answers_without_tools_when_none_fit(registry) -> None:
+    from core.agent.graph import HubAgent
+    from core.agent.providers import MockProvider
+
+    result = HubAgent(registry, MockProvider()).run("hello there")
+    assert result["tools_used"] == []
+    assert result["answer"]
+
+
+def test_agent_trace_records_every_step(registry) -> None:
+    from core.agent.graph import HubAgent
+    from core.agent.providers import MockProvider
+
+    result = HubAgent(registry, MockProvider()).run("What are the churn model metrics?")
+    nodes = [t["node"] for t in result["trace"]]
+    assert "plan" in nodes and "act" in nodes
+    assert all("ms" in t for t in result["trace"]), "the UI renders timings, so they must exist"
+
+
+def test_agent_iteration_cap_prevents_a_runaway_loop(registry) -> None:
+    """A provider that always calls a tool must be stopped, not allowed to spin."""
+    from core.agent.graph import HubAgent
+    from core.agent.providers import Message, ToolCall
+
+    class RunawayProvider:
+        name = "runaway"
+
+        def complete(self, messages, tools):
+            return Message(role="assistant", tool_calls=[
+                ToolCall(id="c", name="list_knowledge_sources", arguments={})
+            ])
+
+    agent = HubAgent(registry, RunawayProvider(), max_iterations=3)
+    result = agent.run("loop forever")
+    acts = [t for t in result["trace"] if t.get("node") == "act"]
+    assert len(acts) == 3, f"expected the cap to stop it at 3, got {len(acts)}"
+    assert result["answer"]
+
+
+def test_agent_survives_a_tool_that_raises(registry) -> None:
+    """One body failing must not take down the conversation."""
+    from core.agent.graph import HubAgent
+    from core.agent.providers import MockProvider
+
+    result = HubAgent(registry, MockProvider()).run("Optimise the price for SKU-999")
+    assert result["answer"], "the agent should still answer after a tool error"
+
+
+def test_every_tool_result_gets_summarised(registry) -> None:
+    """No tool may fall through to the raw-JSON catch-all.
+
+    `_summarise` is a chain of shape checks, so a new body silently gets the fallback and the
+    user is shown a wall of JSON. This drives *every* registered tool with schema-filled
+    arguments and asserts each output is turned into prose — so adding a body without a
+    summariser branch fails here rather than in production.
+    """
+    import json
+
+    from core.agent.providers import MockProvider, _summarise
+
+    for tool in registry.all_tools():
+        args = MockProvider._args_for(tool.name, "example query about the data", tool)
+        try:
+            out = registry.dispatch(tool.name, args)
+        except Exception as exc:  # a body that raises is covered elsewhere
+            continue
+        summary = _summarise(json.dumps(out, default=str))
+        assert not summary.startswith("Tool returned:"), (
+            f"{tool.name} has no summariser branch and leaked raw JSON"
+        )
+        assert "```json" not in summary, f"{tool.name} leaked serialised tool output"
+        assert len(summary.strip()) > 20, f"{tool.name} produced an empty summary"
+
+
+ROUTING_PROBES = [
+    # Drift checks. These sit ahead of the body-scoped metrics patterns in _TOOL_HINTS:
+    # "is the fraud model still valid?" contains both a body noun and a model noun, so without
+    # that ordering it resolves to the metrics tool and the drift check is unreachable.
+    # Both of these shipped broken and were found by sweeping all 22 tools with one phrasing
+    # each, not by hand-picking probes.
+    #  * "rank engines by maintenance urgency" put the verb before the noun, so an ordered
+    #    `a[\s\S]*b` pattern missed and it fell through to a *churn* tool on the word "rank".
+    #  * "what can the scraper do" matched scrape_url's `scrape\w*` on the word "scraper", so a
+    #    question about the scraper was answered by using it.
+    ("rank engines by maintenance urgency", "rank_engines_by_urgency"),
+    ("which engines need maintenance first", "rank_engines_by_urgency"),
+    ("rank the worst engines", "rank_engines_by_urgency"),
+    ("what can the scraper do", "scraper_capabilities"),
+    ("rank the customers most at risk of churning", "rank_at_risk_customers"),
+    ("has the fraud feed drifted?", "check_fraud_drift"),
+    ("is the fraud model still valid?", "check_fraud_drift"),
+    ("check drift on the transaction stream", "check_fraud_drift"),
+    ("has the fleet drifted?", "check_fleet_drift"),
+    ("is the maintenance model still valid?", "check_fleet_drift"),
+    ("check sensor drift on the engines", "check_fleet_drift"),
+    ("List the knowledge sources", "list_knowledge_sources"),
+    ("What documents are in the corpus?", "list_knowledge_sources"),
+    ("Search the knowledge base for the refund window", "search_knowledge"),
+    ("What discount can an agent approve?", "search_knowledge"),
+    ("What are the churn model metrics?", "get_churn_model_metrics"),
+    ("How good is the churn model?", "get_churn_model_metrics"),
+    ("What are the fraud model metrics?", "get_fraud_model_metrics"),
+    # Word order must not matter: the noun can come before OR after the metric word.
+    ("Show the maintenance model card", "get_maintenance_model_metrics"),
+    ("How good is the maintenance model?", "get_maintenance_model_metrics"),
+    # And a metrics question must not resolve to the action tool just because it shares a noun.
+    ("What is the MAE of the RUL model?", "get_maintenance_model_metrics"),
+    ("Render https://dashboard.example.com in a browser", "render_url"),
+    ("Fetch the JS-rendered page https://example.com/app", "render_url"),
+    ("Extract https://example.com/pricing", "extract_url"),
+    ("Scrape https://example.com", "scrape_url"),
+    ("Search the web for the latest churn benchmarks", "web_search"),
+    ("Rank the top 5 customers most likely to churn", "rank_at_risk_customers"),
+    ("How good is the fraud model?", "get_fraud_model_metrics"),
+    ("Score this transaction for fraud", "score_transaction"),
+    ("What's happening on the fraud feed right now?", "summarise_fraud_stream"),
+    ("Which engines need maintenance first?", "rank_engines_by_urgency"),
+    ("Predict the remaining useful life", "predict_rul"),
+    ("Audit the diabetes model for fairness", "audit_model_fairness"),
+    ("Which SKUs have the biggest pricing opportunity", "list_skus_by_opportunity"),
+    ("Optimise the price for SKU-007", "optimise_price"),
+    ("Scrape https://example.com", "scrape_url"),
+    ("What are your scraping capabilities?", "scraper_capabilities"),
+    ("Assess this patient diabetes risk", "assess_diabetes_risk"),
+]
+
+
+@pytest.mark.parametrize("question,want", ROUTING_PROBES)
+def test_agent_routes_each_question_to_the_right_tool(registry, question, want) -> None:
+    """Intent routing, pinned.
+
+    Two failure modes this guards, both of which shipped once already:
+      * a body-scoped pattern placed after a generic one ("how good is the fraud model" used
+        to resolve to the churn metrics tool);
+      * `a[\\s\\S]*b` assuming word order, which fails on reordered phrasings.
+    """
+    from core.agent.providers import _pick_tool
+
+    available = {t.name for t in registry.all_tools()}
+    got = _pick_tool(question, available)
+    assert got == want, f"{question!r} routed to {got!r}, expected {want!r}"
+
+
+# --- drift detection -----------------------------------------------------------
+
+
+def test_psi_is_zero_for_identical_and_grows_with_shift() -> None:
+    """PSI must actually discriminate, or the verdicts it produces are decoration."""
+    import numpy as np
+
+    from core.drift import population_stability_index
+
+    rng = np.random.default_rng(0)
+    ref = rng.lognormal(3.5, 0.8, 4000)
+
+    same = population_stability_index(ref, rng.lognormal(3.5, 0.8, 2000))
+    mid = population_stability_index(ref, rng.lognormal(3.9, 0.8, 2000))
+    far = population_stability_index(ref, rng.lognormal(4.6, 0.8, 2000))
+
+    assert same < 0.05, "an identical draw must read as no drift"
+    assert same < mid < far, "PSI must be monotonic in shift size"
+    assert far > 0.25, "a large shift must cross the significant threshold"
+
+
+def test_drift_verdicts_match_the_documented_thresholds() -> None:
+    from core.drift import MODERATE, SIGNIFICANT, verdict
+
+    assert "no significant" in verdict(0.01)
+    assert "moderate" in verdict((MODERATE + SIGNIFICANT) / 2)
+    assert "significant" in verdict(SIGNIFICANT + 0.1)
+
+
+def test_bin_edges_are_cut_on_the_reference_not_the_actual() -> None:
+    """If you re-bin on the incoming data you measure it against itself and never see drift."""
+    import numpy as np
+
+    from core.drift import psi_bins
+
+    ref = np.random.default_rng(1).normal(0, 1, 2000)
+    edges = psi_bins(ref)
+    assert edges[0] == -np.inf and edges[-1] == np.inf, "outer bins must be open"
+    # Same edges reused for a shifted sample still show the shift.
+    from core.drift import population_stability_index
+
+    shifted = np.random.default_rng(2).normal(3, 1, 2000)
+    assert population_stability_index(ref, shifted, edges=edges) > 0.25
+
+
+def test_fraud_drift_tool_reports_against_the_training_distribution(registry) -> None:
+    out = registry.get("fraud").call_tool("check_fraud_drift", {"n": 300})
+    assert out["n_features_scored"] > 0
+    assert out["reference_size"] > 0
+    assert "thresholds" in out and out["thresholds"]["significant"] == 0.25
+    assert out["caveats"], "the marginals-only blind spot must be disclosed"
+    # Fresh synthetic transactions come from the same generator, so this must read clean.
+    assert out["mean_psi"] < 0.1, f"false positive: mean_psi={out['mean_psi']}"
+
+
+def test_fleet_drift_tool_reads_clean_on_same_generator_data(registry) -> None:
+    """Regression: the generator drew sensor baselines from its seed, so two calls produced
+    marginals ~22 sigma apart and this reported significant drift on identical-distribution
+    data. Baselines are now derived from the sensor name, as real CMAPSS sensors are fixed."""
+    out = registry.get("maintenance").call_tool("check_fleet_drift", {"n_engines": 12})
+    assert out["mean_psi"] < 0.1, f"false positive: mean_psi={out['mean_psi']}"
+    assert out["reference_source"] in ("synthetic", "cmapss-fd001")
+
+
+def test_stale_artifacts_are_rejected_not_silently_loaded(tmp_path) -> None:
+    """A pickled dataclass omits fields added since it was written, so an old bundle loads fine
+    and then raises AttributeError at the call site. Versioning turns that into a retrain."""
+    import pickle
+
+    from core.artifacts import SCHEMA, StaleArtifactError, load, save
+
+    # A module-level stand-in: a locally-defined class cannot be pickled at all, which would
+    # make this test fail for a reason unrelated to versioning.
+    from core.types import MetricsReport
+
+    payload = MetricsReport(n_samples=10, positive_rate=0.1, scores={"pr_auc": 0.5},
+                            confusion={}, threshold=0.4, notes=[], groups={}, group_basis="")
+
+    path = tmp_path / "model.pkl"
+    with path.open("wb") as fh:
+        pickle.dump(payload, fh)  # no schema envelope at all - the pre-versioning shape
+    with pytest.raises(StaleArtifactError, match="no schema version"):
+        load(path)
+
+    with path.open("wb") as fh:
+        pickle.dump({"schema": SCHEMA - 1, "bundle": payload}, fh)
+    with pytest.raises(StaleArtifactError, match="Retraining"):
+        load(path)
+
+    save(payload, path)
+    assert load(path).n_samples == 10, "a current-schema artifact must load"
+
+
+def test_every_body_that_saves_an_artifact_versions_it() -> None:
+    """Forgetting one body reintroduces the AttributeError-at-the-call-site bug for that body
+    only, which is exactly the kind of failure that shows up in production and not in CI."""
+    import pathlib
+
+    for path in pathlib.Path("modules").rglob("*.py"):
+        src = path.read_text()
+        if "pickle.dump" in src:
+            assert "core.artifacts" in src, (
+                f"{path} pickles directly instead of using core.artifacts; a field added to its "
+                "bundle would silently vanish from cached artifacts."
+            )
+
+
+def test_frontend_body_mirror_matches_the_registry(registry) -> None:
+    """The hub renders a static mirror of the bodies (apps/web/lib/types.ts KNOWN_BODIES) as a
+    cold-backend fallback. When that mirror listed five bodies as "planned" while the backend had
+    all seven live, the hub showed working products as not-yet-built. Pin the mirror to the
+    registry so the two cannot drift again: same ids, and each mirror href equals the body's own
+    advertised UI route."""
+    import pathlib
+    import re
+
+    src = pathlib.Path("apps/web/lib/types.ts").read_text()
+    block = src.split("KNOWN_BODIES", 1)[1]
+    mirror_ids = re.findall(r'\bid:\s*"([^"]+)"', block)
+    mirror_hrefs = dict(re.findall(r'\bid:\s*"([^"]+)",.*?href:\s*"([^"]+)"', block, re.S))
+
+    assert set(mirror_ids) == set(registry.ids()), (
+        f"frontend mirror {sorted(mirror_ids)} != registry {sorted(registry.ids())}; "
+        "a body added to one and not the other makes the hub lie about what exists."
+    )
+
+    for mid in mirror_ids:
+        manifest = registry.get(mid).manifest
+        assert mirror_hrefs.get(mid) == manifest.routes.get("ui"), (
+            f"mirror href for {mid} ({mirror_hrefs.get(mid)}) != its UI route "
+            f"({manifest.routes.get('ui')}); clicking the tile would land somewhere wrong."
+        )

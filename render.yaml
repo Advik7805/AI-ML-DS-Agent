@@ -1,0 +1,88 @@
+# Blueprint for the API on Render's free tier.
+#
+# Free-tier realities this design works around:
+#   - sleeps after 15 min idle  -> the frontend renders with a "waking up" notice, never blank
+#   - ephemeral filesystem      -> nothing persistent lives on disk; artifacts are rebuildable
+#   - 512 MB RAM                -> no torch/transformers in this image
+services:
+  - type: web
+    name: saros-api
+    runtime: docker
+    dockerfilePath: ./deploy/Dockerfile.api
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+
+      # --- integrations, all optional -------------------------------------
+      # Every one of these has a labelled mock fallback, so the deploy works with none of them
+      # set. `sync: false` means Render prompts at deploy time rather than failing the build —
+      # a student filling in keys later should not have to edit this file.
+      #
+      # A key alone never enables a metered service: each also needs its *_LIVE flag. That way a
+      # key pasted into the dashboard for a local experiment cannot make a demo billable.
+
+      - key: SAROS_LLM
+        value: "mock"               # mock | groq | gemini
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: SAROS_TAVILY_LIVE
+        value: "0"                  # flip to 1 once a key is set
+      - key: SAROS_TAVILY_MAX_RESULTS
+        value: "5"
+      - key: SAROS_TAVILY_SEARCH_DEPTH
+        value: "basic"              # basic = 1 credit; advanced = 2
+
+      - key: SAROS_SCRAPER_LIVE
+        value: "0"
+      - key: SAROS_SCRAPER_ALLOW
+        value: ""                   # empty => all live fetches blocked
+
+      # Optional. Jina Reader's anonymous endpoint works with no key at ~20 req/min; a free
+      # key (10M tokens, no card) raises that to 500 RPM.
+      # Optional overrides. Sensible defaults exist for all of them.
+      - key: GROQ_MODEL
+        sync: false
+      - key: GEMINI_MODEL
+        sync: false
+      # Requests per client per path, per window. In-memory unless Upstash is configured,
+      # so this is per-process on a single free instance.
+      - key: SAROS_RATE_LIMIT
+        value: "60"
+      - key: SAROS_RATE_WINDOW
+        value: "60"
+      # Local run log. Ephemeral on Render - set MLFLOW_TRACKING_URI for durable history.
+      - key: SAROS_RUNS_FILE
+        value: artifacts/runs.jsonl
+      - key: JINA_API_KEY
+        sync: false
+      # Optional. Leave unset and training runs go to artifacts/runs.jsonl instead.
+      # Note Render's filesystem is ephemeral, so the JSONL log does not survive a redeploy.
+      - key: MLFLOW_TRACKING_URI
+        sync: false
+      - key: FIRECRAWL_API_KEY
+        sync: false
+      - key: SAROS_FIRECRAWL_LIVE
+        value: "0"
+
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SAROS_SUPABASE_LIVE
+        value: "0"
+      - key: SAROS_SUPABASE_TABLE
+        value: knowledge_documents
+
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false
+      - key: SAROS_UPSTASH_LIVE
+        value: "0"

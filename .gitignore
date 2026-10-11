@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Trained artifacts and generated data — reproducible, so not committed
+artifacts/
+data/generated/
+*.pkl
+
+# Raw datasets are fetched by data/fetch.sh, not committed
+data/raw/
+
+# Node
+node_modules/
+*.tsbuildinfo
+.next/
+out/
+dist/
+.turbo/
+
+# Env
+.env
+.env.local
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,22 @@
+[project]
+name = "nexus"
+version = "0.1.0"
+description = "One hub, many independent bodies — an AI/ML/data-science agent platform."
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+filterwarnings = [
+    "error::DeprecationWarning:apps.*",
+    "error::DeprecationWarning:core.*",
+    "error::DeprecationWarning:modules.*",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["B008"]

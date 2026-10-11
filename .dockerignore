@@ -1,0 +1,66 @@
+# Docker build context for the API image.
+#
+# This matters more than it looks. Without it the context is ~937 MB, of which ~930 MB is
+# `apps/web/node_modules` and `apps/web/.next` — the frontend build, which the API image never
+# touches. The API itself is under 1 MB. Every Render build re-uploads the whole context, so on
+# a free tier this is the difference between a build that finishes and one that times out.
+#
+# Rule of thumb: the API needs core/, modules/, apps/api/, requirements.txt, pyproject.toml and
+# data/fetch.sh. Everything else is excluded below.
+
+# --- frontend: the entire Next.js tree ----------------------------------------
+apps/web/
+**/node_modules/
+**/.next/
+**/out/
+**/dist/
+**/.turbo/
+**/*.tsbuildinfo
+
+# --- version control -----------------------------------------------------------
+.git/
+.gitignore
+.gitattributes
+
+# --- python caches and tooling -------------------------------------------------
+**/__pycache__/
+**/*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# --- data: fetched at build time by data/fetch.sh, never shipped in the context
+data/raw/
+data/*.csv
+
+# --- generated artifacts: trained at runtime, never shipped ---------------------
+# These are pickled models, regenerated on first use. Baking them in would mean the image
+# carries a model trained on whoever's laptop built it - which is exactly the provenance
+# problem data/fetch.sh exists to avoid. They also add ~10 MB to every build upload.
+artifacts/
+*.pkl
+
+# --- local environment: must never be baked into an image ----------------------
+# Secrets belong in the platform's env var store, not in a layer that anyone who can pull the
+# image can read.
+.env
+.env.*
+!.env.example
+
+# --- CI, docs, deploy metadata -------------------------------------------------
+.github/
+docs/
+deploy/
+render.yaml
+README.md
+LICENCE
+LICENSE
+
+# --- OS / editor ---------------------------------------------------------------
+.DS_Store
+.idea/
+.vscode/
