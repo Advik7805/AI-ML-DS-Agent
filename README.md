@@ -108,20 +108,27 @@ Two rules keep it honest, both enforced in CI:
 ```
 core/
   types.py       Prediction · Explanation · MetricsReport · ModuleManifest — one shape for all
-  contract.py    the Module ABC and the registry that discovers bodies
+  contract.py    the Module ABC; the registry that discovers bodies; the training hook
+  explain.py     explainer selection by estimator type, so a linear model cannot crash SHAP
+  drift.py       PSI per feature, binned on the training distribution
+  tracking.py    every run recorded — MLflow when configured, local JSONL otherwise
+  artifacts.py   schema-versioned pickles, so a stale model retrains instead of half-loading
   agent/         LangGraph plan-act loop; mock/groq/gemini providers
   integrations/  env-gated external services, each with an honest mock fallback
 modules/
   churn/         ← a body: data.py, train.py, service.py. Self-contained.
   fraud/ maintenance/ pricing/ rag/ scraper/ xai_health/
+flows/
+  train_all.py   retrains every body; Prefect decorators when installed, plain functions when not
 apps/
   api/           FastAPI gateway. Generic — knows nothing about any one body.
   web/           Next.js: (hub)/ plus one root layout per body
 data/fetch.sh    pulls the real datasets; refuses Git LFS pointers
-tests/           contract conformance, per-body quality, integrations, gateway over HTTP
-docs/            RESEARCH · ARCHITECTURE · BUILD-NOTES
-deploy/          API Dockerfile
-.env.example     every variable the platform understands, with its free-tier terms
+tests/           8 suites: contract, per-body quality, integrations, gateway over HTTP,
+                 providers, explainer selection, tracking + orchestration, churn
+docs/            RESEARCH · ARCHITECTURE · BUILD-NOTES · DEPLOY
+deploy/          API Dockerfile · supabase_schema.sql
+.env.example     every variable the platform reads, with its free-tier terms
 ```
 
 ---
