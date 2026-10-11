@@ -1,4 +1,4 @@
-"""The Nexus API gateway.
+"""The Saros API gateway.
 
 One FastAPI app that mounts every body generically. Nothing here knows what churn *is* — it
 only knows the contract. Adding a module means adding a directory under ``modules/``; this
@@ -36,7 +36,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     lifespan=lifespan,
-    title="Nexus",
+    title="Saros",
     version="0.1.0",
     description=(
         "One hub, many independent bodies. Every module implements the same contract, so the "
@@ -285,8 +285,8 @@ def agent_info() -> dict[str, Any]:
         "max_iterations": agent.max_iterations,
         "tools": [t.name for t in agent.registry.all_tools()],
         "note": (
-            "Running on the deterministic mock provider. Set NEXUS_LLM=groq or "
-            "NEXUS_LLM=gemini with the matching API key for real reasoning."
+            "Running on the deterministic mock provider. Set SAROS_LLM=groq or "
+            "SAROS_LLM=gemini with the matching API key for real reasoning."
             if agent.provider.name == "mock"
             else None
         ),

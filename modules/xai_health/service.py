@@ -1,4 +1,4 @@
-"""Explainable Diagnostics — a Nexus body.
+"""Explainable Diagnostics — a Saros body.
 
 The point of this body is not the classifier. Any competent model predicts diabetes from
 glucose and BMI. The point is the two things that make a high-stakes model deployable:
@@ -37,6 +37,7 @@ from core.contract import Module
 from core.types import AgentTool, Explanation, FeatureAttribution, MetricsReport, ModuleManifest, Prediction
 
 from .data import FEATURES, TARGET, load_diabetes
+from core.explain import build_explainer
 
 ACCENT = "#a78bfa"
 ARTIFACT = Path(__file__).resolve().parents[2] / "artifacts" / "xai_health" / "model.pkl"
@@ -281,7 +282,7 @@ class XaiHealthModule(Module):
         bundle = self.bundle
         clf = bundle.pipeline.named_steps["clf"]
         X = bundle.pipeline.named_steps["impute"].transform(bundle.frame(payload))
-        explainer = shap.TreeExplainer(clf)
+        explainer = build_explainer(clf).explainer
         sv = explainer.shap_values(X)
         sv = sv[:, :, -1] if getattr(sv, "ndim", 0) == 3 else sv
         base = float(np.ravel(explainer.expected_value)[-1])

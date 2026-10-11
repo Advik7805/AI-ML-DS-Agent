@@ -24,8 +24,8 @@ export interface StorefrontProps {
 
 export function storefrontMetadata(p: StorefrontProps): Metadata {
   return {
-    title: `${p.title} — Nexus`,
-    description: `${p.tagline} An independent Nexus body connected to the hub through the shared module contract.`,
+    title: `${p.title} — Saros`,
+    description: `${p.tagline} An independent Saros body connected to the hub through the shared module contract.`,
   };
 }
 
@@ -59,7 +59,7 @@ export function Storefront({ p, children }: { p: StorefrontProps; children: Reac
               <div className="leading-tight">
                 <div className="text-[14px] font-semibold tracking-tight">{p.title}</div>
                 <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#a8a29e]">
-                  nexus body · /{p.id}
+                  saros body · /{p.id}
                 </div>
               </div>
             </div>
@@ -87,7 +87,7 @@ export function Storefront({ p, children }: { p: StorefrontProps; children: Reac
                 className="font-mono text-[11px] uppercase tracking-[0.24em]"
                 style={{ color: p.accent }}
               >
-                nexus body · {p.id}
+                saros body · {p.id}
               </p>
               <h1 className="mt-4 max-w-3xl text-4xl font-semibold leading-[1.1] tracking-tight sm:text-5xl">
                 {p.tagline}
@@ -99,7 +99,7 @@ export function Storefront({ p, children }: { p: StorefrontProps; children: Reac
 
         <footer className="relative z-10 mt-16 border-t border-[#e7e0d5] px-5 py-8">
           <div className="mx-auto max-w-6xl text-[12px] text-[#a8a29e]">
-            An independent Nexus body. Own route, own identity, own models, own tests — connected
+            An independent Saros body. Own route, own identity, own models, own tests — connected
             to the hub only through <code className="font-mono">core/contract.py</code>.
           </div>
         </footer>

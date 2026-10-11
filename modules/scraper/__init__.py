@@ -1,4 +1,4 @@
-"""Scraper — a Nexus body."""
+"""Scraper — a Saros body."""
 
 from .service import MODULE, ScraperModule
 

@@ -1,4 +1,4 @@
-"""Knowledge RAG — a Nexus body."""
+"""Knowledge RAG — a Saros body."""
 
 from .service import MODULE, RagModule
 

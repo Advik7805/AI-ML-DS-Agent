@@ -24,7 +24,7 @@ from core.agent.providers import Message, Provider
 from core.contract import ModuleRegistry
 from core.types import AgentTool
 
-SYSTEM_PROMPT = """You are the Nexus hub agent. You coordinate independent specialist bodies —
+SYSTEM_PROMPT = """You are the Saros hub agent. You coordinate independent specialist bodies —
 churn, retrieval, fraud, maintenance, pricing, scraping — each exposed to you as a tool.
 
 Rules:

@@ -1,4 +1,4 @@
-"""Knowledge RAG — a Nexus body.
+"""Knowledge RAG — a Saros body.
 
 Retrieval lives here; *synthesis* lives in the hub agent. That split is deliberate: a body
 should not own an LLM dependency, and keeping retrieval separate means the same passages can

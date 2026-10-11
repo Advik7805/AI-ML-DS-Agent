@@ -1,4 +1,4 @@
-# Deploying Nexus for $0
+# Deploying Saros for $0
 
 Every step here is verified against the code in this repo. Nothing requires a credit card.
 
@@ -29,15 +29,15 @@ serves the other six).
    path, `/health` as the health check, and all 18 env vars.
 3. Render will prompt for the eight secrets marked `sync: false`. **Leave them blank.** Every one
    has a labelled mock fallback.
-4. Deploy. You get something like `https://nexus-api.onrender.com`.
+4. Deploy. You get something like `https://saros-api.onrender.com`.
 
 Verify it:
 
 ```bash
-curl https://nexus-api.onrender.com/health
+curl https://saros-api.onrender.com/health
 # {"status":"ok","modules_loaded":[...7 ids...],"load_errors":{}}
 
-curl https://nexus-api.onrender.com/api/v1/integrations
+curl https://saros-api.onrender.com/api/v1/integrations
 ```
 
 **What to expect on the free tier:** the service sleeps after 15 minutes idle and the next
@@ -48,8 +48,8 @@ Two things already handle it:
 
 - **The frontend degrades.** Every page catches the fetch failure and renders a notice rather
   than a blank screen.
-- **Keep-alive keeps it warm.** Add `NEXUS_API_URL` as a *repository secret* in GitHub
-  (Settings → Secrets and variables → Actions) set to `https://nexus-api.onrender.com`. The
+- **Keep-alive keeps it warm.** Add `SAROS_API_URL` as a *repository secret* in GitHub
+  (Settings → Secrets and variables → Actions) set to `https://saros-api.onrender.com`. The
   [`keep-alive`](../.github/workflows/keep-alive.yml) workflow then pings `/health` every 10
   minutes, inside the 15-minute window. Without the secret it skips cleanly rather than failing.
 
@@ -63,7 +63,7 @@ Two things already handle it:
 2. **Set `API_ORIGIN` before the first build.** This is the step people miss:
 
    ```
-   API_ORIGIN = https://nexus-api.onrender.com
+   API_ORIGIN = https://saros-api.onrender.com
    ```
 
    No trailing slash. Without it the build **fails on purpose**, with a message naming the
@@ -86,12 +86,12 @@ panel and `GET /api/v1/integrations` show what is live and what is still mocked.
 
 | Service | Env vars | Free tier | What it unlocks |
 |---|---|---|---|
-| **Groq** | `GROQ_API_KEY`, `NEXUS_LLM=groq` | free tier, per-minute limits | real reasoning in the hub agent |
-| **Gemini** | `GEMINI_API_KEY`, `NEXUS_LLM=gemini` | free tier, per-day limits | same, second vendor |
-| **Tavily** | `TAVILY_API_KEY`, `NEXUS_TAVILY_LIVE=1` | **1,000 credits/month, students free** | `web_search`, `extract_url` |
-| **Firecrawl** | `FIRECRAWL_API_KEY`, `NEXUS_FIRECRAWL_LIVE=1` | 500 credits **one-time** | `render_url` (JS rendering) |
-| **Upstash** | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, `NEXUS_UPSTASH_LIVE=1` | 10k commands/day | shared rate limiting |
-| **Supabase** | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `NEXUS_SUPABASE_LIVE=1` | 500 MB | extra knowledge-base documents, no redeploy |
+| **Groq** | `GROQ_API_KEY`, `SAROS_LLM=groq` | free tier, per-minute limits | real reasoning in the hub agent |
+| **Gemini** | `GEMINI_API_KEY`, `SAROS_LLM=gemini` | free tier, per-day limits | same, second vendor |
+| **Tavily** | `TAVILY_API_KEY`, `SAROS_TAVILY_LIVE=1` | **1,000 credits/month, students free** | `web_search`, `extract_url` |
+| **Firecrawl** | `FIRECRAWL_API_KEY`, `SAROS_FIRECRAWL_LIVE=1` | 500 credits **one-time** | `render_url` (JS rendering) |
+| **Upstash** | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, `SAROS_UPSTASH_LIVE=1` | 10k commands/day | shared rate limiting |
+| **Supabase** | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SAROS_SUPABASE_LIVE=1` | 500 MB | extra knowledge-base documents, no redeploy |
 
 Suggested order, best value first:
 
@@ -99,7 +99,7 @@ Suggested order, best value first:
    output and starts actually reasoning. A missing key falls back to the mock provider rather
    than throwing, so this is safe to experiment with.
 2. **Tavily.** 1,000 credits a month with no card is enough for real development. Basic search
-   is 1 credit; keep `NEXUS_TAVILY_SEARCH_DEPTH=basic` — `advanced` doubles it.
+   is 1 credit; keep `SAROS_TAVILY_SEARCH_DEPTH=basic` — `advanced` doubles it.
 3. **Upstash.** Worth doing *before* you share the link publicly. Without it the rate limit is
    per-process, so one crawler can exhaust the API's request budget.
 4. **Firecrawl.** Only if a page genuinely needs a browser. Tavily's extract covers most cases
@@ -142,9 +142,9 @@ Worth understanding before you debug a "why is this still mock?" question.
 | Symptom | Cause | Fix |
 |---|---|---|
 | Pages render, every API call fails | `API_ORIGIN` unset or wrong | Set it in Vercel; no trailing slash |
-| First request after idle takes ~60s | Render free tier spin-down | Normal. Add the `NEXUS_API_URL` secret |
-| Agent answers look templated | `NEXUS_LLM=mock` | Set a key and `NEXUS_LLM=groq`/`gemini` |
-| Web search returns placeholders | Tavily key set but flag off | Also set `NEXUS_TAVILY_LIVE=1` |
+| First request after idle takes ~60s | Render free tier spin-down | Normal. Add the `SAROS_API_URL` secret |
+| Agent answers look templated | `SAROS_LLM=mock` | Set a key and `SAROS_LLM=groq`/`gemini` |
+| Web search returns placeholders | Tavily key set but flag off | Also set `SAROS_TAVILY_LIVE=1` |
 | `429` responses | Rate limit | Expected; `X-RateLimit-*` headers say which backend counted |
 | A body is missing from the hub | It failed to import | `GET /health` → check `load_errors` |
 

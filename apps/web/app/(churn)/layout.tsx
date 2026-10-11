@@ -16,7 +16,7 @@ import "../globals.css";
 */
 
 export const metadata: Metadata = {
-  title: "Churn & Retention — Nexus",
+  title: "Churn & Retention — Saros",
   description:
     "Gradient-boosted churn scoring on the 3,333-row telecom dataset. SMOTE for class imbalance, sigmoid calibration, F1-selected operating threshold, and per-customer SHAP explanations.",
 };
@@ -48,7 +48,7 @@ export default function ChurnLayout({ children }: { children: React.ReactNode })
               <div className="leading-tight">
                 <div className="text-[14px] font-semibold tracking-tight">Churn &amp; Retention</div>
                 <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#a8a29e]">
-                  nexus body · v0.1.0
+                  saros body · v0.1.0
                 </div>
               </div>
             </div>
@@ -78,7 +78,7 @@ export default function ChurnLayout({ children }: { children: React.ReactNode })
         <footer className="relative z-10 mt-16 border-t border-[#e7e0d5] px-5 py-8">
           <div className="mx-auto max-w-6xl text-[12px] text-[#a8a29e]">
             <p>
-              An independent Nexus body. Own API router, own model, own tests. Connected to the
+              An independent Saros body. Own API router, own model, own tests. Connected to the
               hub only through the shared module contract.
             </p>
           </div>

@@ -40,6 +40,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 from core.types import MetricsReport
+from core.explain import build_explainer
 
 from .data import FEATURES, RAW_CHURN_CSV, TARGET, load_telco
 
@@ -229,12 +230,17 @@ def train_churn(
     # folds can only learn the sigmoid map, never retrain the trees.
     model = CalibratedClassifierCV(FrozenEstimator(base), method="sigmoid", cv=3).fit(X_cal, y_cal)
 
-    explainer = shap.TreeExplainer(candidates[best_name].named_steps["clf"])
+    # Chosen from the estimator, not assumed. On the real telco data gradient boosting wins by
+    # a wide margin, but the selection is by PR-AUC — and on the synthetic fallback the linear
+    # candidate can win, at which point TreeExplainer raises instead of explaining.
+    _choice = build_explainer(candidates[best_name].named_steps["clf"], background=X_fit)
+    explainer = _choice.explainer
     notes.append(
         "SHAP attributions come from the uncalibrated estimator, so they decompose the raw "
         "model output rather than the calibrated probability shown as `score`. The ranking of "
         "drivers is unaffected; the additive base differs."
     )
+    notes.append(_choice.note)
 
     bundle = ChurnModel(
         model=model,

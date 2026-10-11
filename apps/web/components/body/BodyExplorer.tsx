@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Generic body explorer — renders *any* Nexus body from its manifest and tool schemas.
+ * Generic body explorer — renders *any* Saros body from its manifest and tool schemas.
  *
  * This is the payoff of the module contract on the frontend: one component drives churn, fraud,
  * maintenance, pricing, diagnostics, RAG and the scraper. A new body gets a working console

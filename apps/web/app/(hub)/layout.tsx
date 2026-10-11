@@ -15,7 +15,7 @@ import "../globals.css";
 */
 
 export const metadata: Metadata = {
-  title: "Nexus — AI/ML/Data-Science agent platform",
+  title: "Saros — AI/ML/Data-Science agent platform",
   description:
     "One hub, many independent bodies. A multimodal agent platform assembling the senior data scientist's toolchain: RAG, fraud detection, predictive maintenance, explainable AI, dynamic pricing and churn.",
 };
@@ -40,7 +40,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
               <span className="relative h-2 w-2 rounded-full bg-hub shadow-[0_0_12px_3px_rgba(124,92,255,0.7)]" />
             </span>
             <span className="text-[15px] font-semibold tracking-tight">
-              Nexus
+              Saros
               <span className="ml-2 font-mono text-[10px] uppercase tracking-[0.2em] text-ink-faint">
                 hub
               </span>
@@ -73,7 +73,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
 
         <footer className="relative z-10 border-t border-line px-6 py-10 text-center text-xs text-ink-faint sm:px-10">
           <p>
-            Nexus — one contract, many bodies. Every module is independently deployable and
+            Saros — one contract, many bodies. Every module is independently deployable and
             connected to the hub through{" "}
             <code className="font-mono text-ink-dim">core/contract.py</code>.
           </p>

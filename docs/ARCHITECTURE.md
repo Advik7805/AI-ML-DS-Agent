@@ -1,6 +1,6 @@
-# Architecture — "Nexus": one hub, many independent bodies
+# Architecture — "Saros": one hub, many independent bodies
 
-Working name: **Nexus** (rename freely). The idea in your words: *a clean site that has
+Working name: **Saros** (rename freely). The idea in your words: *a clean site that has
 everything, where each component is an independent body, and all bodies connect back to a
 single hub.*
 
@@ -87,7 +87,7 @@ documents. Verified by diffing the served HTML:
 |---|---|---|
 | `<html>` | `lang="en" class="dark"` | `lang="en"` |
 | `<body>` | `min-h-screen overflow-x-hidden bg-void` | `min-h-screen bg-[#fbfaf7] text-[#1c1917] antialiased` |
-| `<title>` | Nexus — AI/ML/Data-Science agent platform | Churn & Retention — Nexus |
+| `<title>` | Saros — AI/ML/Data-Science agent platform | Churn & Retention — Saros |
 | `theme-color` | `#05060a` | `#fffbeb` |
 | 3D canvas / grid floor | present | absent |
 

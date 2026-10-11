@@ -9,7 +9,7 @@ Three modes, chosen explicitly rather than guessed:
 
 - **mock** (default) — deterministic, offline, and labelled. This is what CI and a fresh clone
   run on.
-- **live** — real HTTP calls, gated behind ``NEXUS_TAVILY_LIVE=1`` *and* a key, so a key left
+- **live** — real HTTP calls, gated behind ``SAROS_TAVILY_LIVE=1`` *and* a key, so a key left
   in a local `.env` cannot make a demo accidentally billable.
 - **error** — live requested but misconfigured; raises ``NotConfigured`` rather than quietly
   returning empty results.
@@ -101,7 +101,7 @@ class MockTavily:
             "backend": self.backend,
             "answer": (
                 f"[mock] Offline placeholder for a Tavily search on {query!r}. "
-                f"Set TAVILY_API_KEY and NEXUS_TAVILY_LIVE=1 for real results. "
+                f"Set TAVILY_API_KEY and SAROS_TAVILY_LIVE=1 for real results. "
                 f"Matched terms: {', '.join(terms)}."
             ),
             "results": results,
@@ -120,7 +120,7 @@ class MockTavily:
                     "url": u,
                     "raw_content": (
                         f"[mock] Offline placeholder for the extracted text of {u}. "
-                        "Set TAVILY_API_KEY and NEXUS_TAVILY_LIVE=1 to fetch the real page."
+                        "Set TAVILY_API_KEY and SAROS_TAVILY_LIVE=1 to fetch the real page."
                     ),
                 }
                 for u in urls
@@ -216,8 +216,8 @@ def capabilities() -> dict[str, Any]:
         "has_key": TAVILY.has_key,
         "key_env": TAVILY.key_env,
         "enable_env": TAVILY.enable_env,
-        "max_results": int(os.getenv("NEXUS_TAVILY_MAX_RESULTS", "5") or 5),
-        "search_depth": os.getenv("NEXUS_TAVILY_SEARCH_DEPTH", "basic") or "basic",
+        "max_results": int(os.getenv("SAROS_TAVILY_MAX_RESULTS", "5") or 5),
+        "search_depth": os.getenv("SAROS_TAVILY_SEARCH_DEPTH", "basic") or "basic",
         "free_tier": TAVILY.free_tier,
         "docs_url": TAVILY.docs_url,
         "warning": None

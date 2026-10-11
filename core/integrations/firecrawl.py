@@ -42,7 +42,7 @@ class MockFirecrawl:
             "status": 200,
             "markdown": (
                 f"[mock] Offline placeholder for the JavaScript-rendered content of {url}.\n\n"
-                "Set FIRECRAWL_API_KEY and NEXUS_FIRECRAWL_LIVE=1 to fetch the real page. "
+                "Set FIRECRAWL_API_KEY and SAROS_FIRECRAWL_LIVE=1 to fetch the real page. "
                 "Until then nothing here was retrieved from the network, and none of it should "
                 "be quoted or fed to another body as fact."
             ),

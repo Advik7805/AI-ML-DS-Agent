@@ -26,7 +26,7 @@ from core.types import AgentTool, Explanation, MetricsReport, ModuleManifest, Pr
 
 
 class Module(ABC):
-    """Base class every Nexus body implements.
+    """Base class every Saros body implements.
 
     Subclasses must define ``manifest``, ``predict`` and ``tools``. ``explain``, ``evaluate``,
     ``train`` and ``stream`` are optional; the hub degrades gracefully when they are absent.

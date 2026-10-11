@@ -1,4 +1,4 @@
-"""Fraud & Anomaly — a Nexus body.
+"""Fraud & Anomaly — a Saros body.
 
 Also the first body to implement ``stream()``: the contract's optional live-feed capability.
 Transactions are generated, scored as they arrive, and yielded — which is the same shape a
@@ -18,6 +18,7 @@ import pandas as pd
 
 from .data import FEATURES, synthesize
 from .train import FraudModel, train_fraud
+from core.explain import build_explainer
 
 ACCENT = "#f43f5e"
 
@@ -112,7 +113,7 @@ class FraudModule(Module):
         bundle = self.bundle
         X = bundle.frame(payload)
         try:
-            explainer = shap.TreeExplainer(bundle.supervised)
+            explainer = build_explainer(bundle.supervised).explainer
             sv = explainer.shap_values(X)
             sv = sv[:, :, -1] if getattr(sv, "ndim", 0) == 3 else sv
             import numpy as _np

@@ -1,4 +1,4 @@
-"""Predictive Maintenance — a Nexus body."""
+"""Predictive Maintenance — a Saros body."""
 
 from .service import MODULE, MaintenanceModule
 

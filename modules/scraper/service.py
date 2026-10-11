@@ -1,4 +1,4 @@
-"""Scraper — a Nexus body.
+"""Scraper — a Saros body.
 
 The data-acquisition limb of the platform: every other body needs input, and this is how it
 gets there without a human pasting CSVs.
@@ -7,14 +7,14 @@ gets there without a human pasting CSVs.
 
 - ``MockFetcher`` (default) — deterministic, offline, no dependencies. Lets the agent's
   scraping path be exercised in CI and on a laptop with no network.
-- ``HttpFetcher`` — real HTTP, enabled with ``NEXUS_SCRAPER_LIVE=1``.
+- ``HttpFetcher`` — real HTTP, enabled with ``SAROS_SCRAPER_LIVE=1``.
 
 In production this should be pointed at Firecrawl rather than raw HTTP: it handles JavaScript
 rendering, anti-bot behaviour and markdown conversion, none of which a plain ``GET`` does.
 The interface here is the part that survives that swap.
 
 Safety rails that are not optional:
-- robots-style **allowlist**: only hosts in ``NEXUS_SCRAPER_ALLOW`` are fetched, so the agent
+- robots-style **allowlist**: only hosts in ``SAROS_SCRAPER_ALLOW`` are fetched, so the agent
   cannot be talked into hammering an arbitrary site.
 - **size and depth caps**, a real User-Agent, and a timeout.
 - the result states plainly whether it is live or mocked.
@@ -62,7 +62,7 @@ class MockFetcher:
         body = (
             f"# {host}{path}\n\n"
             f"Mock capture of {url} (fingerprint `{digest}`).\n\n"
-            f"Live scraping is disabled. Set `NEXUS_SCRAPER_LIVE=1` to fetch over HTTP, or wire "
+            f"Live scraping is disabled. Set `SAROS_SCRAPER_LIVE=1` to fetch over HTTP, or wire "
             f"in the Firecrawl client for JavaScript-rendered pages.\n\n"
             f"## Extracted fields\n"
             f"- host: {host}\n- path: {path}\n- bytes: 1024\n"
@@ -83,7 +83,7 @@ class HttpFetcher:
 
     kind = "http"
 
-    def __init__(self, timeout: float = 20.0, user_agent: str = "NexusBot/0.1 (+https://github.com/nexus)"):
+    def __init__(self, timeout: float = 20.0, user_agent: str = "SarosBot/0.1 (+https://github.com/saros)"):
         self.timeout = timeout
         self.user_agent = user_agent
 
@@ -135,9 +135,9 @@ class ScraperConfig:
 
 
 def _config() -> ScraperConfig:
-    raw = os.getenv("NEXUS_SCRAPER_ALLOW", "")
+    raw = os.getenv("SAROS_SCRAPER_ALLOW", "")
     allow = [h.strip().lower() for h in raw.split(",") if h.strip()]
-    live = os.getenv("NEXUS_SCRAPER_LIVE", "").strip().lower() in ("1", "true", "yes")
+    live = os.getenv("SAROS_SCRAPER_LIVE", "").strip().lower() in ("1", "true", "yes")
     return ScraperConfig(allowlist=allow, live=live)
 
 
@@ -240,7 +240,7 @@ class ScraperModule(Module):
                 "bytes": 0,
                 "fetcher": "blocked",
                 "error": (
-                    f"Host not in NEXUS_SCRAPER_ALLOW ({', '.join(cfg.allowlist) or 'empty'}). "
+                    f"Host not in SAROS_SCRAPER_ALLOW ({', '.join(cfg.allowlist) or 'empty'}). "
                     "Live scraping is allowlisted so the agent cannot be directed at an "
                     "arbitrary site."
                 ),
@@ -270,7 +270,7 @@ class ScraperModule(Module):
                 description=(
                     "Search the live web via Tavily and return ranked, LLM-ready results. "
                     "Use this when the answer is not in the local corpus. Runs on labelled mock "
-                    "data until TAVILY_API_KEY and NEXUS_TAVILY_LIVE=1 are set."
+                    "data until TAVILY_API_KEY and SAROS_TAVILY_LIVE=1 are set."
                 ),
                 module_id=self.id,
                 parameters_schema={

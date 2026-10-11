@@ -303,12 +303,12 @@ def test_scraper_rejects_non_http(registry) -> None:
 
 def test_scraper_live_mode_respects_the_allowlist(registry, monkeypatch) -> None:
     """The rail that stops prompt injection pointing the agent at an arbitrary host."""
-    monkeypatch.setenv("NEXUS_SCRAPER_LIVE", "1")
-    monkeypatch.setenv("NEXUS_SCRAPER_ALLOW", "allowed.test")
+    monkeypatch.setenv("SAROS_SCRAPER_LIVE", "1")
+    monkeypatch.setenv("SAROS_SCRAPER_ALLOW", "allowed.test")
     s = registry.get("scraper")
     res = s.call_tool("scrape_url", {"url": "https://not-allowed.test/page"})
     assert res["fetcher"] == "blocked"
-    assert "NEXUS_SCRAPER_ALLOW" in res["error"]
+    assert "SAROS_SCRAPER_ALLOW" in res["error"]
 
 
 def test_scraper_states_its_production_backend(registry) -> None:

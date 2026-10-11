@@ -1,6 +1,6 @@
 """Churn module — the body itself.
 
-Implements :class:`core.contract.Module`. This is the shape every other Nexus body copies:
+Implements :class:`core.contract.Module`. This is the shape every other Saros body copies:
 ``manifest`` for the hub, ``predict`` for scoring, ``explain`` for XAI, ``tools`` for the
 agent, ``evaluate`` for the metrics card.
 

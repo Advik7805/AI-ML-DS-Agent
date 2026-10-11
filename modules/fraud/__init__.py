@@ -1,4 +1,4 @@
-"""Fraud & Anomaly — a Nexus body."""
+"""Fraud & Anomaly — a Saros body."""
 
 from .service import MODULE, FraudModule
 

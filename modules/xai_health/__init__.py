@@ -1,4 +1,4 @@
-"""Explainable Diagnostics — a Nexus body."""
+"""Explainable Diagnostics — a Saros body."""
 
 from .service import MODULE, XaiHealthModule
 

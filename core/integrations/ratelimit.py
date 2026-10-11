@@ -24,8 +24,8 @@ from dataclasses import dataclass
 
 from .config import UPSTASH
 
-DEFAULT_LIMIT = int(os.getenv("NEXUS_RATE_LIMIT", "60") or 60)
-DEFAULT_WINDOW = int(os.getenv("NEXUS_RATE_WINDOW", "60") or 60)
+DEFAULT_LIMIT = int(os.getenv("SAROS_RATE_LIMIT", "60") or 60)
+DEFAULT_WINDOW = int(os.getenv("SAROS_RATE_WINDOW", "60") or 60)
 
 
 @dataclass
@@ -83,7 +83,7 @@ class UpstashLimiter:
 
     Uses one INCR plus an EXPIRE. That is two commands per request, so at 10,000 commands/day
     the free tier covers ~5,000 requests/day — fine for a portfolio project, and the number is
-    the reason `NEXUS_UPSTASH_LIVE` is opt-in rather than automatic.
+    the reason `SAROS_UPSTASH_LIVE` is opt-in rather than automatic.
     """
 
     backend = "upstash"
@@ -98,7 +98,7 @@ class UpstashLimiter:
     def check(self, key: str) -> Decision:
         import httpx
 
-        redis_key = f"nexus:rl:{key}"
+        redis_key = f"saros:rl:{key}"
         headers = {"Authorization": f"Bearer {self.token}"}
 
         r = httpx.post(
@@ -159,7 +159,7 @@ def status() -> dict[str, object]:
         if live
         else (
             "Counting in process memory: the limit is per-instance and resets on restart. Set "
-            "UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN and NEXUS_UPSTASH_LIVE=1 for a "
+            "UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN and SAROS_UPSTASH_LIVE=1 for a "
             "shared limit."
         ),
     }

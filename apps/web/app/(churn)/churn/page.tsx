@@ -23,7 +23,7 @@ export default async function ChurnPage() {
       {/* --- header --------------------------------------------------------- */}
       <section className="pt-12 pb-8">
         <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[#d97706]">
-          nexus body · churn
+          saros body · churn
         </p>
         <h1 className="mt-4 max-w-3xl text-4xl font-semibold leading-[1.1] tracking-tight text-[#1c1917] sm:text-5xl">
           Score every customer&rsquo;s churn risk, and know exactly why.

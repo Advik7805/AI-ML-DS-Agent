@@ -1,4 +1,4 @@
-"""Dynamic Pricing — a Nexus body."""
+"""Dynamic Pricing — a Saros body."""
 
 from .service import MODULE, PricingModule
 

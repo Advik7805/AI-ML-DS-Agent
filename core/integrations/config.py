@@ -39,7 +39,7 @@ class Integration:
     option_env: tuple[str, ...] = field(default_factory=tuple)
     docs_url: str = ""
     free_tier: str = ""
-    #: Which Nexus bodies benefit. Purely informational, shown in the UI.
+    #: Which Saros bodies benefit. Purely informational, shown in the UI.
     used_by: tuple[str, ...] = field(default_factory=tuple)
 
     @property
@@ -107,8 +107,8 @@ TAVILY = Integration(
     name="Tavily",
     purpose="Web search and page extraction for the agent's live research tool.",
     key_env="TAVILY_API_KEY",
-    enable_env="NEXUS_TAVILY_LIVE",
-    option_env=("NEXUS_TAVILY_MAX_RESULTS", "NEXUS_TAVILY_SEARCH_DEPTH"),
+    enable_env="SAROS_TAVILY_LIVE",
+    option_env=("SAROS_TAVILY_MAX_RESULTS", "SAROS_TAVILY_SEARCH_DEPTH"),
     docs_url="https://docs.tavily.com",
     free_tier="1,000 credits/month, no credit card; students free. Basic search = 1 credit.",
     used_by=("scraper", "rag"),
@@ -119,7 +119,7 @@ FIRECRAWL = Integration(
     name="Firecrawl",
     purpose="Production-grade scraping that survives JavaScript-heavy pages.",
     key_env="FIRECRAWL_API_KEY",
-    enable_env="NEXUS_FIRECRAWL_LIVE",
+    enable_env="SAROS_FIRECRAWL_LIVE",
     docs_url="https://docs.firecrawl.dev",
     free_tier="500 credits one-time on the free plan.",
     used_by=("scraper",),
@@ -150,7 +150,7 @@ SUPABASE = Integration(
     name="Supabase",
     purpose="Postgres + pgvector for persisting RAG embeddings across cold starts.",
     key_env="SUPABASE_SERVICE_ROLE_KEY",
-    enable_env="NEXUS_SUPABASE_LIVE",
+    enable_env="SAROS_SUPABASE_LIVE",
     option_env=("SUPABASE_URL",),
     docs_url="https://supabase.com/docs/guides/ai/vector-columns",
     free_tier="500 MB database, 2 projects, pauses after a week of inactivity.",
@@ -162,7 +162,7 @@ UPSTASH = Integration(
     name="Upstash Redis",
     purpose="Rate limiting and caching, so a free-tier backend is not hammered.",
     key_env="UPSTASH_REDIS_REST_TOKEN",
-    enable_env="NEXUS_UPSTASH_LIVE",
+    enable_env="SAROS_UPSTASH_LIVE",
     option_env=("UPSTASH_REDIS_REST_URL",),
     docs_url="https://upstash.com/docs/redis/overall/getstarted",
     free_tier="10,000 commands/day, 256 MB.",

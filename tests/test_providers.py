@@ -210,9 +210,9 @@ def test_gemini_separates_system_from_contents(monkeypatch) -> None:
         capture,
     )
     GeminiProvider(api_key="ai-test").complete(
-        [Message(role="system", content="You are Nexus."), Message(role="user", content="hi")], []
+        [Message(role="system", content="You are Saros."), Message(role="user", content="hi")], []
     )
-    assert capture["json"]["systemInstruction"]["parts"][0]["text"] == "You are Nexus."
+    assert capture["json"]["systemInstruction"]["parts"][0]["text"] == "You are Saros."
     assert all(c.get("role") != "system" for c in capture["json"]["contents"])
 
 
@@ -230,23 +230,23 @@ def test_gemini_handles_an_empty_candidates_array(monkeypatch) -> None:
 
 def test_missing_key_falls_back_to_mock_not_an_exception(monkeypatch) -> None:
     """The single most important deployment behaviour: no key must still yield a working hub."""
-    monkeypatch.setenv("NEXUS_LLM", "groq")
+    monkeypatch.setenv("SAROS_LLM", "groq")
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     assert isinstance(get_provider(), MockProvider)
 
 
 def test_key_present_selects_the_real_provider(monkeypatch) -> None:
-    monkeypatch.setenv("NEXUS_LLM", "groq")
+    monkeypatch.setenv("SAROS_LLM", "groq")
     monkeypatch.setenv("GROQ_API_KEY", "gsk-test")
     assert isinstance(get_provider(), GroqProvider)
 
-    monkeypatch.setenv("NEXUS_LLM", "gemini")
+    monkeypatch.setenv("SAROS_LLM", "gemini")
     monkeypatch.setenv("GEMINI_API_KEY", "ai-test")
     assert isinstance(get_provider(), GeminiProvider)
 
 
 def test_unknown_provider_falls_back_to_mock(monkeypatch) -> None:
-    monkeypatch.setenv("NEXUS_LLM", "openai")
+    monkeypatch.setenv("SAROS_LLM", "openai")
     assert isinstance(get_provider(), MockProvider)
 
 

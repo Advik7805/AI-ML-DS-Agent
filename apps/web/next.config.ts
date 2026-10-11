@@ -24,14 +24,14 @@ if (isProductionBuild && process.env.VERCEL) {
   throw new Error(
     `API_ORIGIN is not set, so every /api request would proxy to ${DEFAULT_ORIGIN} — which is ` +
       "this serverless function's own loopback, where nothing is listening. Set API_ORIGIN to " +
-      "the deployed FastAPI URL (e.g. https://nexus-api.onrender.com) in the Vercel project " +
+      "the deployed FastAPI URL (e.g. https://saros-api.onrender.com) in the Vercel project " +
       "settings. The pages would still render, which is exactly why this must fail the build.",
   );
 }
 if (isProductionBuild) {
   // eslint-disable-next-line no-console
   console.warn(
-    `[nexus] API_ORIGIN is unset; defaulting to ${DEFAULT_ORIGIN}. Fine for a local production ` +
+    `[saros] API_ORIGIN is unset; defaulting to ${DEFAULT_ORIGIN}. Fine for a local production ` +
       "build, broken on any host where the API is not on localhost.",
   );
 }
@@ -42,7 +42,7 @@ const nextConfig: NextConfig = {
   async rewrites() {
     return [
       // Host-based routing: one deploy, many storefronts. Each body can later be given its
-      // own subdomain (churn.nexus.dev) that renders a completely different root layout,
+      // own subdomain (churn.saros.dev) that renders a completely different root layout,
       // exactly like a retailer pointing /electronics at a separate storefront.
       ...(process.env.CHURN_HOST
         ? [

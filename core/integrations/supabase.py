@@ -37,7 +37,7 @@ from typing import Any, Protocol
 
 from .config import SUPABASE, NotConfigured
 
-TABLE = os.getenv("NEXUS_SUPABASE_TABLE", "knowledge_documents")
+TABLE = os.getenv("SAROS_SUPABASE_TABLE", "knowledge_documents")
 
 
 class DocumentSource(Protocol):
@@ -89,7 +89,7 @@ class SupabaseSource:
         if resp.status_code == 404:
             raise RuntimeError(
                 f"Table {self.table!r} not found in this Supabase project. Create it with the "
-                "schema in this module's docstring, or unset NEXUS_SUPABASE_LIVE."
+                "schema in this module's docstring, or unset SAROS_SUPABASE_LIVE."
             )
         resp.raise_for_status()
 
@@ -142,6 +142,6 @@ def status() -> dict[str, Any]:
         if live
         else (
             "Using only the in-repo corpus. Set SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY and "
-            "NEXUS_SUPABASE_LIVE=1 to load additional documents without redeploying."
+            "SAROS_SUPABASE_LIVE=1 to load additional documents without redeploying."
         ),
     }

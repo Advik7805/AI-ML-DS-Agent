@@ -1,4 +1,4 @@
-# Nexus — an AI/ML/Data-Science agent platform
+# Saros — an AI/ML/Data-Science agent platform
 
 > One hub. Many independent bodies. Every body a real, working system.
 
@@ -39,8 +39,8 @@ body. **20 tools** register into one registry, names globally unique.
 Results are read from the live gateway, not a notebook — e.g.
 `GET /api/v1/modules/churn/metrics` and `GET /api/v1/agent/tools`.
 
-The agent runs on a deterministic mock provider by default. Set `NEXUS_LLM=groq` or
-`NEXUS_LLM=gemini` with the matching key for real reasoning; a missing key falls back to mock
+The agent runs on a deterministic mock provider by default. Set `SAROS_LLM=groq` or
+`SAROS_LLM=gemini` with the matching key for real reasoning; a missing key falls back to mock
 rather than failing.
 
 ---
@@ -189,7 +189,7 @@ show what a deploy still needs. Copy [`.env.example`](.env.example) for the full
 | Service | Used by | Free tier | Wired? |
 |---|---|---|---|
 | Tavily | scraper, rag | 1,000 credits/mo, no card | ✅ `web_search`, `extract_url` |
-| Groq / Gemini | agent | free tiers | ✅ `NEXUS_LLM=groq\|gemini` |
+| Groq / Gemini | agent | free tiers | ✅ `SAROS_LLM=groq\|gemini` |
 | Supabase | rag | 500 MB, free forever | ✅ `knowledge_documents` — extra corpus, no redeploy |
 | Upstash | api, scraper | 10k commands/day | ✅ rate limiting on every metered route |
 | Firecrawl | scraper | 500 credits one-time | ✅ `render_url` (JS-rendering) |

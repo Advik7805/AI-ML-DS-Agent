@@ -1,4 +1,4 @@
-"""Shared types for the Nexus platform.
+"""Shared types for the Saros platform.
 
 These are the *contract* types. Every module ("body") produces a ``Prediction`` and, where
 it can, an ``Explanation`` in exactly this shape. That is what lets one React component

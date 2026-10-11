@@ -28,10 +28,10 @@ jobs:
     steps:
       - name: Wake the API
         env:
-          API_URL: ${{ secrets.NEXUS_API_URL }}
+          API_URL: ${{ secrets.SAROS_API_URL }}
         run: |
           if [ -z "$API_URL" ]; then
-            echo "NEXUS_API_URL is not set — skipping. Add it as a repository secret to enable."
+            echo "SAROS_API_URL is not set — skipping. Add it as a repository secret to enable."
             exit 0
           fi
 

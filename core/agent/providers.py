@@ -12,7 +12,7 @@ One protocol, four implementations:
 
 Selection is by env var, so nothing in the codebase branches on which vendor you picked:
 
-    NEXUS_LLM=mock | groq | gemini | echo
+    SAROS_LLM=mock | groq | gemini | echo
     GROQ_API_KEY=...
     GEMINI_API_KEY=...
 
@@ -221,7 +221,7 @@ class MockProvider:
                     content=(
                         "I can score churn risk, rank an at-risk portfolio, report model metrics, "
                         "search the knowledge base, score a transaction for fraud, or scrape a URL. "
-                        "Tell me which. (Running on the mock provider — set NEXUS_LLM=groq or "
+                        "Tell me which. (Running on the mock provider — set SAROS_LLM=groq or "
                         "gemini for real reasoning.)"
                     ),
                 )
@@ -763,7 +763,7 @@ def get_provider(name: str | None = None) -> Provider:
     A student deploying on a free tier will frequently have no key configured, and the hub
     should still be a working product rather than a 500.
     """
-    name = (name or os.getenv("NEXUS_LLM", "mock")).strip().lower()
+    name = (name or os.getenv("SAROS_LLM", "mock")).strip().lower()
     if name in ("groq", "gemini"):
         try:
             return GroqProvider() if name == "groq" else GeminiProvider()

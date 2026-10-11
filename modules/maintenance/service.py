@@ -1,4 +1,4 @@
-"""Predictive Maintenance — a Nexus body.
+"""Predictive Maintenance — a Saros body.
 
 Remaining-useful-life regression on turbofan sensor telemetry. The headline number is not
 RMSE but **early-prediction error**: a model that is accurate near failure and useless 60
@@ -24,6 +24,7 @@ from core.contract import Module
 from core.types import AgentTool, Explanation, FeatureAttribution, MetricsReport, ModuleManifest, Prediction
 
 from .data import FEATURES, RUL_CAP, SENSORS, SETTINGS, load_cmapss, synthesize
+from core.explain import build_explainer
 
 ACCENT = "#22d3ee"
 ARTIFACT = Path(__file__).resolve().parents[2] / "artifacts" / "maintenance" / "rul_model.pkl"
@@ -214,7 +215,7 @@ class MaintenanceModule(Module):
 
         try:
             bundle = self.bundle
-            explainer = shap.TreeExplainer(bundle.model)
+            explainer = build_explainer(bundle.model).explainer
             sv = explainer.shap_values(bundle.frame(payload))[0]
             items = [
                 FeatureAttribution.of(f, float(payload.get(f, 0.0) or 0.0), -float(v))
@@ -230,7 +231,7 @@ class MaintenanceModule(Module):
         import shap
 
         bundle = self.bundle
-        explainer = shap.TreeExplainer(bundle.model)
+        explainer = build_explainer(bundle.model).explainer
         sv = explainer.shap_values(bundle.frame(payload))[0]
         base = float(np.ravel(explainer.expected_value)[-1])
         items = [

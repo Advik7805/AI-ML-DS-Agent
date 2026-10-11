@@ -42,7 +42,7 @@ def test_a_key_alone_does_not_enable_live_calls(monkeypatch) -> None:
     Gating needs both the key and the explicit flag.
     """
     monkeypatch.setenv("TAVILY_API_KEY", "tvly-x")
-    monkeypatch.delenv("NEXUS_TAVILY_LIVE", raising=False)
+    monkeypatch.delenv("SAROS_TAVILY_LIVE", raising=False)
     assert cfg.TAVILY.has_key is True
     assert cfg.TAVILY.enabled is False
     assert get_client().backend == "mock"
@@ -50,7 +50,7 @@ def test_a_key_alone_does_not_enable_live_calls(monkeypatch) -> None:
 
 def test_key_plus_flag_selects_the_live_client(monkeypatch) -> None:
     monkeypatch.setenv("TAVILY_API_KEY", "tvly-x")
-    monkeypatch.setenv("NEXUS_TAVILY_LIVE", "1")
+    monkeypatch.setenv("SAROS_TAVILY_LIVE", "1")
     assert cfg.TAVILY.enabled is True
     assert isinstance(get_client(), TavilyClient)
 
@@ -60,7 +60,7 @@ def test_live_client_refuses_an_empty_key() -> None:
         TavilyClient("")
     # The message must tell the reader exactly which variables to set.
     assert "TAVILY_API_KEY" in str(exc.value)
-    assert "NEXUS_TAVILY_LIVE" in str(exc.value)
+    assert "SAROS_TAVILY_LIVE" in str(exc.value)
 
 
 def test_mock_search_is_deterministic() -> None:
@@ -86,7 +86,7 @@ def test_mock_extract_announces_itself() -> None:
 
 
 def test_capabilities_reports_what_a_deploy_must_set(monkeypatch) -> None:
-    for var in ("TAVILY_API_KEY", "NEXUS_TAVILY_LIVE"):
+    for var in ("TAVILY_API_KEY", "SAROS_TAVILY_LIVE"):
         monkeypatch.delenv(var, raising=False)
     caps = capabilities()
     assert caps["live"] is False
@@ -152,7 +152,7 @@ def test_limiter_reports_its_own_weakness(monkeypatch) -> None:
     """An in-memory counter is per-instance and resets on restart. Say so, do not imply more."""
     from core.integrations import ratelimit
 
-    for var in ("UPSTASH_REDIS_REST_URL", "UPSTASH_REDIS_REST_TOKEN", "NEXUS_UPSTASH_LIVE"):
+    for var in ("UPSTASH_REDIS_REST_URL", "UPSTASH_REDIS_REST_TOKEN", "SAROS_UPSTASH_LIVE"):
         monkeypatch.delenv(var, raising=False)
     ratelimit.reset_limiter()
     s = ratelimit.status()
@@ -167,11 +167,11 @@ def test_upstash_is_selected_only_when_fully_configured(monkeypatch) -> None:
 
     monkeypatch.setenv("UPSTASH_REDIS_REST_URL", "https://example.upstash.io")
     monkeypatch.setenv("UPSTASH_REDIS_REST_TOKEN", "tok")
-    monkeypatch.delenv("NEXUS_UPSTASH_LIVE", raising=False)
+    monkeypatch.delenv("SAROS_UPSTASH_LIVE", raising=False)
     ratelimit.reset_limiter()
     assert ratelimit.get_limiter().backend == "in-memory"
 
-    monkeypatch.setenv("NEXUS_UPSTASH_LIVE", "1")
+    monkeypatch.setenv("SAROS_UPSTASH_LIVE", "1")
     ratelimit.reset_limiter()
     assert ratelimit.get_limiter().backend == "upstash"
     ratelimit.reset_limiter()
@@ -240,11 +240,11 @@ def test_firecrawl_key_plus_flag_selects_the_live_client(monkeypatch) -> None:
     from core.integrations.firecrawl import FirecrawlClient, MockFirecrawl, get_client
 
     monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-x")
-    monkeypatch.delenv("NEXUS_FIRECRAWL_LIVE", raising=False)
+    monkeypatch.delenv("SAROS_FIRECRAWL_LIVE", raising=False)
     assert cfg.FIRECRAWL.enabled is False, "a key alone must not enable a metered service"
     assert isinstance(get_client(), MockFirecrawl)
 
-    monkeypatch.setenv("NEXUS_FIRECRAWL_LIVE", "1")
+    monkeypatch.setenv("SAROS_FIRECRAWL_LIVE", "1")
     assert isinstance(get_client(), FirecrawlClient)
 
 
@@ -306,7 +306,7 @@ def test_supabase_selects_the_live_source_when_fully_configured(monkeypatch) -> 
 
     monkeypatch.setenv("SUPABASE_URL", "https://xyz.supabase.co")
     monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "sb-secret")
-    monkeypatch.setenv("NEXUS_SUPABASE_LIVE", "1")
+    monkeypatch.setenv("SAROS_SUPABASE_LIVE", "1")
     supabase.reset_source()
     assert isinstance(supabase.get_source(), supabase.SupabaseSource)
     supabase.reset_source()

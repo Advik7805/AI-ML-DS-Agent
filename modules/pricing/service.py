@@ -1,4 +1,4 @@
-"""Dynamic Pricing — a Nexus body.
+"""Dynamic Pricing — a Saros body.
 
 Estimates own-price elasticity from a transaction history and recommends a price that
 maximises revenue subject to a demand floor.
