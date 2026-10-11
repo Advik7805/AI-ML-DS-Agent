@@ -120,3 +120,36 @@ predicted vs actual group rates on all 3,333 customers).
   and `pyproject.toml` promotes `DeprecationWarning` to an error for first-party code so this
   cannot creep back.
 - **Dead code removed:** an unused `_numeric_baseline` helper and unused imports.
+
+
+---
+
+## 6. The deploy image trained on synthetic data while claiming the real thing
+
+**Symptom:** nothing observable in CI or locally — the defect only exists inside the Docker
+build. `deploy/Dockerfile.api` runs `RUN bash data/fetch.sh || echo "dataset fetch skipped…"`,
+and its comment said "Real dataset, baked in."
+
+**Cause:** `data/fetch.sh` used `curl`, but `python:3.11-slim` ships `wget` and **not** `curl`
+(verified against the upstream image's apt list). Inside the image the script dies on the first
+line, the `||` swallows it, and the image silently trains on the synthetic fallbacks. Churn
+PR-AUC is 0.677 on the real telco data and 0.495 synthetic — a production-only regression with a
+log line that says nothing went wrong.
+
+**Fix:** the fetch now uses `python3`'s `urllib` — the one binary a Python image guarantees.
+Planting a 75-byte LFS pointer is still detected and refetched.
+
+## 7. The hub showed working products as "planned"
+
+**Symptom:** a user reported "everything except churn is not working." The backends were all
+live; the hub was lying about them.
+
+**Cause:** the hub page hardcoded churn as the only live tile and rendered the other six from a
+static roadmap list marked *planned* with no link. The 3D graph was worse: any live node's click
+ran `router.push('/churn')`, `xai_health` never matched (the list said `xai-health`), and the
+scraper node did not exist.
+
+**Fix:** tiles and graph nodes now render from the live manifests (`GET /api/v1/modules` already
+returns status, accent and each body's UI route); the static list survives only as a
+cold-backend fallback. `test_frontend_body_mirror_matches_the_registry` fails the build if the
+mirror's ids or hrefs ever drift from the registry again.

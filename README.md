@@ -32,7 +32,7 @@ and identity — while connecting to the hub through one shared contract.
 | Knowledge RAG | `/rag` | 6-doc policy corpus | hit@1 **0.833**, 25 passages |
 | Web scraper | `/scraper` | mock by default | host-allowlisted, size-capped |
 
-**220 tests passing** (`python3 -m pytest -q`), across eight suites: contract conformance,
+**221 tests passing** (`python3 -m pytest -q`), across eight suites: contract conformance,
 per-body model quality, the gateway over HTTP, integrations, the LLM providers, explainer
 selection, experiment tracking and orchestration, and the churn body. **22 tools** register into
 one registry, names globally unique.
@@ -140,7 +140,7 @@ deploy/          API Dockerfile · supabase_schema.sql
 ```bash
 pip install -r requirements.txt
 bash data/fetch.sh                    # real dataset; optional — synthetic fallback works
-python -m pytest                      # 220 tests
+python -m pytest                      # 221 tests
 python -m modules.churn.train         # held-out metrics
 uvicorn apps.api.main:app --reload    # http://localhost:8000/docs
 ```
