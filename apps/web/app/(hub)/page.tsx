@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { AgentChat } from "@/components/hub/AgentChat";
 import { IntegrationsPanel } from "@/components/hub/IntegrationsPanel";
+import { RunLog } from "@/components/hub/RunLog";
 import { ModuleGraph } from "@/components/hub/ModuleGraph";
 import { getModules } from "@/lib/api";
 import type { ModuleManifest } from "@/lib/types";
@@ -138,6 +139,23 @@ export default async function HubPage() {
           </p>
           <div className="mt-8">
             <IntegrationsPanel />
+          </div>
+        </div>
+      </section>
+
+      <section id="runs" className="scroll-mt-20 border-t border-line px-6 py-20 sm:px-10">
+        <div className="mx-auto max-w-4xl">
+          <h2 className="text-2xl font-semibold tracking-tight">Every training run is recorded</h2>
+          <p className="mt-3 text-[15px] leading-relaxed text-ink-dim">
+            Seven bodies, each selecting an estimator by a metric, makes &ldquo;which run produced
+            the model that is loaded&rdquo; unanswerable without a log. Training is hooked at the
+            contract level, so a body added later cannot forget to record itself. Runs go to MLflow
+            when <code className="font-mono text-ink">MLFLOW_TRACKING_URI</code> is set and to a
+            local JSONL file otherwise — the panel says which, and says plainly that a local log
+            on an ephemeral filesystem is lost on redeploy.
+          </p>
+          <div className="mt-8">
+            <RunLog />
           </div>
         </div>
       </section>

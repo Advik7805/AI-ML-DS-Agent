@@ -14,6 +14,7 @@ const P: StorefrontProps = {
   accent: "#22d3ee",
   sections: [
     { href: "#board", label: "Fleet queue" },
+    { href: "#drift", label: "Model health" },
     { href: "#console", label: "Console" },
   ],
 };

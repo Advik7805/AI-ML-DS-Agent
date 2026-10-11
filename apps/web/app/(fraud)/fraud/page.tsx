@@ -1,4 +1,5 @@
 import { BodyExplorer } from "@/components/body/BodyExplorer";
+import { DriftPanel } from "@/components/body/DriftPanel";
 import { FraudStream } from "@/components/fraud/FraudStream";
 
 export const dynamic = "force-dynamic";
@@ -12,6 +13,14 @@ export default function Page() {
 
       <section id="board" className="mx-auto max-w-6xl scroll-mt-24 px-5 pb-10">
         <FraudStream />
+      </section>
+
+      <section id="drift" className="mx-auto max-w-6xl scroll-mt-24 px-5 pb-10">
+        <h2 className="pb-1.5 text-[18px] font-semibold tracking-tight">Model health</h2>
+        <p className="max-w-2xl pb-4 text-[13.5px] leading-relaxed text-[#57534e]">Trained once, served indefinitely — so the panel below compares a fresh batch against the distribution the model learned from. A model that stays confident while its inputs move is the failure that matters most on a live feed.</p>
+        <div className="max-w-xl">
+          <DriftPanel tool="check_fraud_drift" accent="#f43f5e" label="Fraud feed drift" />
+        </div>
       </section>
 
       <section id="console" className="mx-auto max-w-6xl scroll-mt-24 px-5 pb-16">

@@ -61,6 +61,12 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
               Agent
             </Link>
             <Link
+              href="#runs"
+              className="rounded-lg px-3 py-1.5 text-ink-dim transition hover:bg-white/5 hover:text-ink"
+            >
+              Runs
+            </Link>
+            <Link
               href="/churn"
               className="ml-2 rounded-lg bg-white/10 px-3.5 py-1.5 font-medium text-ink ring-1 ring-white/15 transition hover:bg-white/15"
             >
