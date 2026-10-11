@@ -34,7 +34,7 @@ and identity — while connecting to the hub through one shared contract.
 
 **215 tests passing** (`python3 -m pytest -q`), across eight suites: contract conformance,
 per-body model quality, the gateway over HTTP, integrations, the LLM providers, explainer
-selection, experiment tracking and orchestration, and the churn body. **20 tools** register into
+selection, experiment tracking and orchestration, and the churn body. **22 tools** register into
 one registry, names globally unique.
 
 Results are read from the live gateway, not a notebook — e.g.
@@ -43,6 +43,14 @@ Results are read from the live gateway, not a notebook — e.g.
 The agent runs on a deterministic mock provider by default. Set `SAROS_LLM=groq` or
 `SAROS_LLM=gemini` with the matching key for real reasoning; a missing key falls back to mock
 rather than failing.
+
+**Drift detection on the real-time bodies.** `check_fraud_drift` and `check_fleet_drift` compare
+a fresh batch against the distribution each model was trained on, reporting per-feature
+Population Stability Index and an overall verdict. Both are trained once and served indefinitely
+on an ephemeral container, so without this a model can stay confident, keep answering, and be
+quietly wrong. Bin edges are cut on the training distribution and never move, and the output
+states the blind spot plainly: PSI on binned marginals cannot see a joint shift that leaves every
+marginal intact.
 
 **Experiment tracking is always on.** Every training run is recorded with its metrics, threshold
 and wall-clock time, and `GET /api/v1/runs` reads the log back. It goes to MLflow when
