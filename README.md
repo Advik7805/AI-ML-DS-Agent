@@ -32,9 +32,10 @@ and identity — while connecting to the hub through one shared contract.
 | Knowledge RAG | `/rag` | 6-doc policy corpus | hit@1 **0.833**, 25 passages |
 | Web scraper | `/scraper` | mock by default | host-allowlisted, size-capped |
 
-**176 tests passing** (`python3 -m pytest -q`), across six suites: contract conformance,
-per-body model quality, the gateway over HTTP, integrations, the LLM providers, and the churn
-body. **20 tools** register into one registry, names globally unique.
+**202 tests passing** (`python3 -m pytest -q`), across eight suites: contract conformance,
+per-body model quality, the gateway over HTTP, integrations, the LLM providers, explainer
+selection, experiment tracking and orchestration, and the churn body. **20 tools** register into
+one registry, names globally unique.
 
 Results are read from the live gateway, not a notebook — e.g.
 `GET /api/v1/modules/churn/metrics` and `GET /api/v1/agent/tools`.
@@ -42,6 +43,13 @@ Results are read from the live gateway, not a notebook — e.g.
 The agent runs on a deterministic mock provider by default. Set `SAROS_LLM=groq` or
 `SAROS_LLM=gemini` with the matching key for real reasoning; a missing key falls back to mock
 rather than failing.
+
+**Experiment tracking is always on.** Every training run is recorded with its metrics, threshold
+and wall-clock time, and `GET /api/v1/runs` reads the log back. It goes to MLflow when
+`MLFLOW_TRACKING_URI` is set, otherwise to `artifacts/runs.jsonl` — MLflow is ~100 MB and the API
+runs on a 512 MB container, so it stays in `requirements-mlflow.txt` rather than the main
+requirements. `python -m flows.train_all` retrains every body in one command, using Prefect's
+decorators when Prefect is installed and plain functions when it is not.
 
 ---
 
@@ -117,7 +125,7 @@ deploy/          API Dockerfile
 ```bash
 pip install -r requirements.txt
 bash data/fetch.sh                    # real dataset; optional — synthetic fallback works
-python -m pytest                      # 176 tests
+python -m pytest                      # 202 tests
 python -m modules.churn.train         # held-out metrics
 uvicorn apps.api.main:app --reload    # http://localhost:8000/docs
 ```
@@ -188,11 +196,17 @@ show what a deploy still needs. Copy [`.env.example`](.env.example) for the full
 
 | Service | Used by | Free tier | Wired? |
 |---|---|---|---|
+| **Jina Reader** | scraper | **~20 req/min with no key at all**; 500 RPM + 10M tokens with a free key | ✅ `render_url` — the default renderer |
 | Tavily | scraper, rag | 1,000 credits/mo, no card | ✅ `web_search`, `extract_url` |
 | Groq / Gemini | agent | free tiers | ✅ `SAROS_LLM=groq\|gemini` |
 | Supabase | rag | 500 MB, free forever | ✅ `knowledge_documents` — extra corpus, no redeploy |
 | Upstash | api, scraper | 10k commands/day | ✅ rate limiting on every metered route |
-| Firecrawl | scraper | 500 credits one-time | ✅ `render_url` (JS-rendering) |
+| Firecrawl | scraper | 500 credits **one-time** | ✅ used for `render_url` only if configured |
+| MLflow | tracking | self-hosted, free | ✅ opt-in via `MLFLOW_TRACKING_URI`; JSONL otherwise |
+
+Jina is the default renderer and needs no key, so JS rendering works on a fresh deploy with zero
+configuration. Firecrawl is used only when explicitly configured — its 500 credits never refill,
+and spending a one-time allowance on something free elsewhere is a bad trade.
 
 
 ---

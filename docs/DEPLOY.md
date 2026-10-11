@@ -89,9 +89,15 @@ panel and `GET /api/v1/integrations` show what is live and what is still mocked.
 | **Groq** | `GROQ_API_KEY`, `SAROS_LLM=groq` | free tier, per-minute limits | real reasoning in the hub agent |
 | **Gemini** | `GEMINI_API_KEY`, `SAROS_LLM=gemini` | free tier, per-day limits | same, second vendor |
 | **Tavily** | `TAVILY_API_KEY`, `SAROS_TAVILY_LIVE=1` | **1,000 credits/month, students free** | `web_search`, `extract_url` |
-| **Firecrawl** | `FIRECRAWL_API_KEY`, `SAROS_FIRECRAWL_LIVE=1` | 500 credits **one-time** | `render_url` (JS rendering) |
+| **Jina Reader** | `JINA_API_KEY` *(optional)* | **~20 req/min with no key**; 500 RPM + 10M tokens with a free key | `render_url` — works with zero configuration |
+| **Firecrawl** | `FIRECRAWL_API_KEY`, `SAROS_FIRECRAWL_LIVE=1` | 500 credits **one-time** | `render_url` fallback, only if configured |
+| **MLflow** | `MLFLOW_TRACKING_URI` | self-hosted, free | experiment history across redeploys |
 | **Upstash** | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, `SAROS_UPSTASH_LIVE=1` | 10k commands/day | shared rate limiting |
 | **Supabase** | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SAROS_SUPABASE_LIVE=1` | 500 MB | extra knowledge-base documents, no redeploy |
+
+**Note that JS rendering needs nothing at all.** `render_url` goes through Jina Reader's
+anonymous endpoint by default, so scraping works on a fresh deploy with no key and no signup. A
+free Jina key only raises the limit from ~20 to 500 requests/minute.
 
 Suggested order, best value first:
 
@@ -102,8 +108,9 @@ Suggested order, best value first:
    is 1 credit; keep `SAROS_TAVILY_SEARCH_DEPTH=basic` — `advanced` doubles it.
 3. **Upstash.** Worth doing *before* you share the link publicly. Without it the rate limit is
    per-process, so one crawler can exhaust the API's request budget.
-4. **Firecrawl.** Only if a page genuinely needs a browser. Tavily's extract covers most cases
-   on a friendlier allowance, and Firecrawl's 500 credits never refill.
+4. **Firecrawl.** Almost certainly skip it. Jina already renders JavaScript for free, and
+   Firecrawl's 500 credits never refill. It only earns its place if you need its crawl, sitemap
+   or structured-extract endpoints.
 5. **Supabase.** Only if you want to add knowledge-base documents without redeploying. It is a
    plain-text document table, *not* a vector store — at 25 passages TF-IDF already retrieves
    correctly and pgvector would add a round trip and an embedding dependency for nothing. Create
