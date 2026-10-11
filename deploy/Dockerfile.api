@@ -3,8 +3,10 @@
 # heavy framework should get its own image rather than making every other body pay for it in
 # cold-start time.
 #
-# The build context is trimmed by .dockerignore from ~880 MB to ~4 MB; without it every build
-# re-uploads the frontend's node_modules, which this image never touches.
+# The build context is trimmed by .dockerignore from ~880 MB to under half a megabyte. Without it
+# every build re-uploads the frontend's node_modules (~634 MB) and the generated model pickles
+# (~10 MB), none of which this image uses. Baking pickles in would also mean shipping a model
+# trained on whoever's laptop built the image.
 FROM python:3.11-slim
 
 WORKDIR /app
