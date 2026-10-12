@@ -66,11 +66,11 @@ export function IntegrationsPanel() {
           <span className="relative flex h-2 w-2">
             <span
               className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-60"
-              style={{ background: live.length ? "#22d3ee" : "#f59e0b" }}
+              style={{ background: live.length ? "var(--color-hub)" : "var(--color-churn)" }}
             />
             <span
               className="relative inline-flex h-2 w-2 rounded-full"
-              style={{ background: live.length ? "#22d3ee" : "#f59e0b" }}
+              style={{ background: live.length ? "var(--color-hub)" : "var(--color-churn)" }}
             />
           </span>
           <span className="text-[13px] font-semibold text-ink">External services</span>
@@ -99,8 +99,8 @@ export function IntegrationsPanel() {
               <span
                 className="shrink-0 rounded-md px-1.5 py-0.5 font-mono text-[9.5px] uppercase tracking-wider"
                 style={{
-                  background: i.enabled ? "rgba(34,211,238,0.15)" : "rgba(245,158,11,0.14)",
-                  color: i.enabled ? "#67e8f9" : "#fcd34d",
+                  background: "var(--color-void-3)",
+                  color: "var(--color-ink)",
                 }}
               >
                 {i.enabled ? "live" : "mock"}
@@ -134,7 +134,7 @@ export function IntegrationsPanel() {
 
       {mocked.length > 0 && (
         <p className="mt-4 border-t border-white/10 pt-3 text-[11px] leading-relaxed text-ink-faint">
-          Everything above marked <span className="font-mono text-[#fcd34d]">mock</span> returns
+          Everything above marked <span className="font-mono text-churn">mock</span> returns
           deterministic placeholder data that labels itself, in the payload and in the UI. Nothing
           is silently faked — a result you cannot distinguish from a real one is worse than an
           error.

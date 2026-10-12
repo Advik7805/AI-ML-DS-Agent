@@ -28,13 +28,10 @@ interface Fleet {
   engines: Engine[];
 }
 
-const ACCENT = "#0891b2";
+const ACCENT = "#22d3ee";
 
-function bandColor(rul: number) {
-  if (rul < 15) return "#dc2626";
-  if (rul < 30) return "#ea580c";
-  if (rul < 60) return "#d97706";
-  return "#16a34a";
+function bandColor(_rul: number) {
+  return ACCENT;
 }
 
 export function FleetBoard() {
@@ -68,7 +65,7 @@ export function FleetBoard() {
 
   if (error)
     return (
-      <div className="rounded-2xl border border-[#fecaca] bg-[#fef2f2] p-6 text-[13px] text-[#991b1b]">
+      <div className="rounded-2xl border border-line bg-void-3 p-6 text-[13px] text-ink-dim">
         Fleet unavailable: {error}
       </div>
     );
@@ -84,30 +81,31 @@ export function FleetBoard() {
 
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_300px]">
-      <div className="rounded-2xl border border-[#e7e0d5] bg-white p-6 shadow-sm">
+      <div className="rounded-2xl border border-line bg-void-2 p-6 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 className="text-[15px] font-semibold tracking-tight">Maintenance queue</h3>
-            <p className="mt-0.5 text-[11.5px] text-[#a8a29e]">
+            <p className="mt-0.5 text-[11.5px] text-ink-faint">
               {fleet ? `${fleet.n_engines} engines · ${fleet.data_source} telemetry` : "loading…"}
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <span className="font-mono text-[10.5px] text-[#a8a29e]">show</span>
+            <span className="font-mono text-[10.5px] text-ink-faint">show</span>
             <input
               type="range"
               min={5}
               max={25}
               value={n}
               onChange={(e) => setN(Number(e.target.value))}
-              className="w-28 accent-[#0891b2]"
+              className="w-28"
+              style={{ accentColor: ACCENT }}
             />
             <span className="w-6 font-mono text-[11px] tabular-nums">{n}</span>
           </div>
         </div>
 
         <div className="mt-4 space-y-1">
-          <div className="grid grid-cols-[52px_70px_1fr_86px_64px] gap-2 px-1 pb-1 font-mono text-[10px] uppercase tracking-wider text-[#a8a29e]">
+          <div className="grid grid-cols-[52px_70px_1fr_86px_64px] gap-2 px-1 pb-1 font-mono text-[10px] uppercase tracking-wider text-ink-faint">
             <span>unit</span>
             <span>cycle</span>
             <span>predicted life left</span>
@@ -121,11 +119,11 @@ export function FleetBoard() {
               initial={{ opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.025 }}
-              className="grid grid-cols-[52px_70px_1fr_86px_64px] items-center gap-2 rounded-lg px-1 py-1.5 hover:bg-[#fafaf9]"
+              className="grid grid-cols-[52px_70px_1fr_86px_64px] items-center gap-2 rounded-lg px-1 py-1.5 hover:bg-white/5"
             >
-              <span className="font-mono text-[12px] text-[#57534e]">#{e.unit}</span>
-              <span className="font-mono text-[11.5px] tabular-nums text-[#78716c]">{e.cycle}</span>
-              <div className="relative h-2 overflow-hidden rounded-full bg-[#f5f5f4]">
+              <span className="font-mono text-[12px] text-ink-dim">#{e.unit}</span>
+              <span className="font-mono text-[11.5px] tabular-nums text-ink-dim">{e.cycle}</span>
+              <div className="relative h-2 overflow-hidden rounded-full bg-void-3">
                 <motion.div
                   className="h-full rounded-full"
                   style={{ background: bandColor(e.predicted_rul) }}
@@ -140,25 +138,25 @@ export function FleetBoard() {
               >
                 {e.predicted_rul.toFixed(0)} cyc
               </span>
-              <span className="text-right font-mono text-[11px] tabular-nums text-[#a8a29e]">
+              <span className="text-right font-mono text-[11px] tabular-nums text-ink-faint">
                 {e.urgency.toFixed(2)}
               </span>
             </motion.div>
           ))}
 
           {busy && (
-            <div className="py-6 text-center text-[12px] text-[#a8a29e]">Ranking the fleet…</div>
+            <div className="py-6 text-center text-[12px] text-ink-faint">Ranking the fleet…</div>
           )}
         </div>
       </div>
 
       <div className="space-y-3">
         {metrics && (
-          <div className="rounded-2xl border border-[#e7e0d5] bg-white p-5 shadow-sm">
-            <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-[#a8a29e]">
+          <div className="rounded-2xl border border-line bg-void-2 p-5 shadow-sm">
+            <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-ink-faint">
               Error by remaining life
             </div>
-            <p className="mt-2 text-[11.5px] leading-relaxed text-[#78716c]">
+            <p className="mt-2 text-[11.5px] leading-relaxed text-ink-dim">
               Overall MAE hides where the model fails. These are cycles of error inside each band,
               cross-validated by engine.
             </p>
@@ -167,10 +165,10 @@ export function FleetBoard() {
                 const max = Math.max(...bands.map((x) => x.v), 1);
                 return (
                   <div key={b.label} className="flex items-center gap-2">
-                    <span className="w-14 shrink-0 font-mono text-[10.5px] text-[#57534e]">
+                    <span className="w-14 shrink-0 font-mono text-[10.5px] text-ink-dim">
                       {b.label}
                     </span>
-                    <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-[#f5f5f4]">
+                    <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-void-3">
                       <div
                         className="h-full rounded-full"
                         style={{ width: `${(b.v / max) * 100}%`, background: ACCENT }}
@@ -187,15 +185,15 @@ export function FleetBoard() {
         )}
 
         {metrics && (
-          <div className="rounded-2xl border border-[#e7e0d5] bg-white p-5 shadow-sm">
-            <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-[#a8a29e]">
+          <div className="rounded-2xl border border-line bg-void-2 p-5 shadow-sm">
+            <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-ink-faint">
               Model
             </div>
             <div className="mt-2 text-3xl font-semibold tabular-nums tracking-tight">
               {metrics.scores.r2?.toFixed(3)}
             </div>
-            <div className="text-[12px] text-[#57534e]">R² · MAE {metrics.scores.mae_cycles?.toFixed(1)} cycles</div>
-            <p className="mt-3 border-t border-[#f5f5f4] pt-3 text-[11px] leading-relaxed text-[#a8a29e]">
+            <div className="text-[12px] text-ink-dim">R² · MAE {metrics.scores.mae_cycles?.toFixed(1)} cycles</div>
+            <p className="mt-3 border-t border-line pt-3 text-[11px] leading-relaxed text-ink-faint">
               {metrics.notes.find((x) => /source/i.test(x)) ?? "Synthetic CMAPSS-compatible telemetry."}
             </p>
           </div>

@@ -164,11 +164,11 @@ export function AgentChat() {
                   <ol className="mt-2 space-y-1.5 border-l border-white/10 pl-3">
                     {t.trace.map((e, j) => (
                       <li key={j} className="font-mono text-[10.5px] leading-relaxed">
-                        <span className={e.ok === false ? "text-red-400" : "text-ink-dim"}>
+                        <span className={e.ok === false ? "text-churn" : "text-ink-dim"}>
                           {e.node === "act" ? `↳ ${e.tool}` : `plan${e.provider ? ` (${e.provider})` : ""}`}
                         </span>
                         <span className="ml-2 text-ink-faint">{e.ms}ms</span>
-                        {e.error && <div className="mt-0.5 text-red-400">{e.error}</div>}
+                        {e.error && <div className="mt-0.5 text-churn">{e.error}</div>}
                         {e.arguments && Object.keys(e.arguments).length > 0 && (
                           <div className="mt-0.5 truncate text-ink-faint">
                             {JSON.stringify(e.arguments).slice(0, 120)}

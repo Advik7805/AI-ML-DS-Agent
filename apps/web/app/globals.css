@@ -1,9 +1,9 @@
 @import "tailwindcss";
 
 /*
-  Nexus design tokens. Two visual identities share this file on purpose: the hub is a dark,
-  volumetric console; each body (storefront) overrides the accent and surface so it reads as
-  its own site. Tokens live in one place so a body can never drift off-system.
+  Saros design tokens. The hub and every body share the same dark surface and ink system;
+  individual bodies keep their own accent so each remains identifiable without switching to a
+  separate light theme. Tokens live in one place so a body can never drift off-system.
 */
 @theme {
   --color-void: #05060a;
@@ -88,5 +88,5 @@ body {
   border-radius: 99px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #2a3149;
+  background: var(--color-void-3);
 }

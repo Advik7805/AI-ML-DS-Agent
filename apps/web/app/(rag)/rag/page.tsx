@@ -7,7 +7,7 @@ export default function Page() {
   return (
     <>
       <div className="mx-auto max-w-6xl px-5 pb-8">
-        <p className="max-w-2xl text-[15px] leading-relaxed text-[#57534e]">Heading-aware chunking and TF-IDF ranking over an enterprise policy corpus, with a grounding verdict attached to every answer. Retrieval lives here; synthesis lives in the hub agent, so any provider can cite the same passages.</p>
+        <p className="max-w-2xl text-[15px] leading-relaxed text-ink-dim">Heading-aware chunking and TF-IDF ranking over an enterprise policy corpus, with a grounding verdict attached to every answer. Retrieval lives here; synthesis lives in the hub agent, so any provider can cite the same passages.</p>
       </div>
 
       <section id="board" className="mx-auto max-w-6xl scroll-mt-24 px-5 pb-10">

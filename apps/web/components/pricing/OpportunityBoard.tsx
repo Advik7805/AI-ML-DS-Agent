@@ -31,7 +31,7 @@ interface Opportunities {
   note: string;
 }
 
-const ACCENT = "#059669";
+const ACCENT = "#34d399";
 
 export function OpportunityBoard() {
   const [data, setData] = useState<Opportunities | null>(null);
@@ -71,14 +71,14 @@ export function OpportunityBoard() {
 
   if (error)
     return (
-      <div className="rounded-2xl border border-[#fecaca] bg-[#fef2f2] p-6 text-[13px] text-[#991b1b]">
+      <div className="rounded-2xl border border-line bg-void-3 p-6 text-[13px] text-ink-dim">
         Pricing unavailable: {error}
       </div>
     );
 
   if (!data)
     return (
-      <div className="animate-pulse rounded-2xl border border-[#e7e0d5] bg-white p-6 text-[13px] text-[#a8a29e]">
+      <div className="animate-pulse rounded-2xl border border-line bg-void-2 p-6 text-[13px] text-ink-faint">
         Estimating elasticities…
       </div>
     );
@@ -87,9 +87,9 @@ export function OpportunityBoard() {
 
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
-      <div className="rounded-2xl border border-[#e7e0d5] bg-white p-6 shadow-sm">
+      <div className="rounded-2xl border border-line bg-void-2 p-6 shadow-sm">
         <h3 className="text-[15px] font-semibold tracking-tight">Revenue opportunity by SKU</h3>
-        <p className="mt-1 text-[11.5px] text-[#a8a29e]">
+        <p className="mt-1 text-[11.5px] text-ink-faint">
           {data.n_skus - data.n_not_identified} of {data.n_skus} SKUs have an identified
           elasticity. Click a row for the full recommendation.
         </p>
@@ -97,7 +97,7 @@ export function OpportunityBoard() {
         <div className="mt-4 overflow-x-auto">
           <table className="w-full text-left text-[12.5px]">
             <thead>
-              <tr className="border-b border-[#e7e0d5] font-mono text-[10px] uppercase tracking-wider text-[#a8a29e]">
+              <tr className="border-b border-line font-mono text-[10px] uppercase tracking-wider text-ink-faint">
                 <th className="py-2 pr-3">sku</th>
                 <th className="py-2 pr-3 text-right">elasticity</th>
                 <th className="py-2 pr-3 text-right">price to</th>
@@ -113,7 +113,7 @@ export function OpportunityBoard() {
                   animate={{ opacity: 1 }}
                   transition={{ delay: i * 0.02 }}
                   onClick={() => void optimise(s.sku)}
-                  className="cursor-pointer border-b border-[#f5f5f4] transition hover:bg-[#fafaf9]"
+                  className="cursor-pointer border-b border-line transition hover:bg-white/5"
                 >
                   <td className="py-2 pr-3 font-mono text-[12px]">{s.sku}</td>
                   <td className="py-2 pr-3 text-right font-mono tabular-nums">{s.elasticity.toFixed(2)}</td>
@@ -122,25 +122,25 @@ export function OpportunityBoard() {
                   </td>
                   <td className="py-2 pr-3">
                     <div className="flex items-center gap-2">
-                      <div className="relative h-1.5 w-24 overflow-hidden rounded-full bg-[#f5f5f4]">
+                      <div className="relative h-1.5 w-24 overflow-hidden rounded-full bg-void-3">
                         <div
                           className="h-full rounded-full"
                           style={{
                             width: `${Math.max(2, (Math.abs(s.estimated_revenue_uplift) / maxUplift) * 100)}%`,
-                            background: s.estimated_revenue_uplift >= 0 ? ACCENT : "#d97706",
+                            background: ACCENT,
                           }}
                         />
                       </div>
                       <span
                         className="font-mono text-[11px] tabular-nums"
-                        style={{ color: s.estimated_revenue_uplift >= 0 ? ACCENT : "#d97706" }}
+                        style={{ color: ACCENT }}
                       >
                         {s.estimated_revenue_uplift >= 0 ? "+" : ""}
                         {(s.estimated_revenue_uplift * 100).toFixed(1)}%
                       </span>
                     </div>
                   </td>
-                  <td className="py-2 text-right font-mono text-[11px] tabular-nums text-[#78716c]">
+                  <td className="py-2 text-right font-mono text-[11px] tabular-nums text-ink-dim">
                     {s.r2.toFixed(2)}
                   </td>
                 </motion.tr>
@@ -150,28 +150,28 @@ export function OpportunityBoard() {
         </div>
 
         {data.not_identified.length > 0 && (
-          <div className="mt-4 rounded-xl border border-[#fde68a] bg-[#fffbeb] p-4">
-            <div className="text-[12.5px] font-medium text-[#92400e]">
+          <div className="mt-4 rounded-xl border border-line bg-void-3 p-4">
+            <div className="text-[12.5px] font-medium text-ink-dim">
               {data.n_not_identified} SKU(s) with no identified elasticity:{" "}
               <span className="font-mono">{data.not_identified.join(", ")}</span>
             </div>
-            <p className="mt-1 text-[11.5px] leading-relaxed text-[#a16207]">{data.note}</p>
+            <p className="mt-1 text-[11.5px] leading-relaxed text-ink-dim">{data.note}</p>
           </div>
         )}
       </div>
 
-      <div className="rounded-2xl border border-[#e7e0d5] bg-white p-5 shadow-sm">
-        <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-[#a8a29e]">
+      <div className="rounded-2xl border border-line bg-void-2 p-5 shadow-sm">
+        <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-ink-faint">
           Recommendation
         </div>
 
         {!selected && (
-          <p className="mt-3 text-[12.5px] text-[#a8a29e]">Select a SKU to see its elasticity
+          <p className="mt-3 text-[12.5px] text-ink-faint">Select a SKU to see its elasticity
             confidence interval and the demand floor the recommendation respects.</p>
         )}
 
         {selected && !detail && (
-          <p className="mt-3 animate-pulse text-[12.5px] text-[#a8a29e]">Optimising…</p>
+          <p className="mt-3 animate-pulse text-[12.5px] text-ink-faint">Optimising…</p>
         )}
 
         {selected && detail && (
@@ -198,15 +198,15 @@ function Detail({ meta, price, label, decision }: {
         ${typeof price === "number" ? price.toFixed(2) : "—"}
       </div>
       <div className="text-[13px] font-medium">{String(label ?? "")}</div>
-      <p className="text-[12px] leading-relaxed text-[#57534e]">{String(decision ?? "")}</p>
+      <p className="text-[12px] leading-relaxed text-ink-dim">{String(decision ?? "")}</p>
 
-      <dl className="space-y-1.5 border-t border-[#f5f5f4] pt-3 text-[12px]">
+      <dl className="space-y-1.5 border-t border-line pt-3 text-[12px]">
         {Object.entries(meta)
           .filter(([k]) => DETAIL_KEYS.includes(k))
           .map(([k, v]) => (
           <div key={k} className="flex items-baseline justify-between gap-2">
-            <dt className="font-mono text-[10.5px] text-[#78716c]">{k.replace(/_/g, " ")}</dt>
-            <dd className="text-right font-mono text-[11px] tabular-nums text-[#1c1917]">
+            <dt className="font-mono text-[10.5px] text-ink-dim">{k.replace(/_/g, " ")}</dt>
+            <dd className="text-right font-mono text-[11px] tabular-nums text-ink">
               {Array.isArray(v)
                 ? `[${v.map((x) => (typeof x === "number" ? x.toFixed(3) : String(x))).join(", ")}]`
                 : typeof v === "number"
@@ -217,7 +217,7 @@ function Detail({ meta, price, label, decision }: {
         ))}
       </dl>
 
-      <p className="border-t border-[#f5f5f4] pt-3 text-[11px] leading-relaxed text-[#a8a29e]">
+      <p className="border-t border-line pt-3 text-[11px] leading-relaxed text-ink-faint">
         Recommendations are clipped to the price range actually observed in the history. An
         optimum outside that range would be an extrapolation, not a finding.
       </p>
