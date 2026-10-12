@@ -29,7 +29,7 @@ export const viewport: Viewport = {
 export default function HubLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className="dark">
-      <body className="min-h-screen overflow-x-hidden bg-void">
+      <body className="min-h-screen overflow-x-hidden bg-void text-ink antialiased">
         <div className="ambient" />
         <div className="pointer-events-none fixed inset-0 z-0 grid-floor" />
 
@@ -55,20 +55,32 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
               Bodies
             </Link>
             <Link
-              href="#agent"
+              href="#guide"
               className="rounded-lg px-3 py-1.5 text-ink-dim transition hover:bg-white/5 hover:text-ink"
+            >
+              Guide
+            </Link>
+            <Link
+              href="#analyze"
+              className="rounded-lg px-3 py-1.5 text-ink-dim transition hover:bg-white/5 hover:text-ink"
+            >
+              Analyze
+            </Link>
+            <Link
+              href="#agent"
+              className="hidden rounded-lg px-3 py-1.5 text-ink-dim transition hover:bg-white/5 hover:text-ink lg:inline-flex"
             >
               Agent
             </Link>
             <Link
               href="#runs"
-              className="rounded-lg px-3 py-1.5 text-ink-dim transition hover:bg-white/5 hover:text-ink"
+              className="hidden rounded-lg px-3 py-1.5 text-ink-dim transition hover:bg-white/5 hover:text-ink lg:inline-flex"
             >
               Runs
             </Link>
             <Link
               href="/churn"
-              className="ml-2 rounded-lg bg-white/10 px-3.5 py-1.5 font-medium text-ink ring-1 ring-white/15 transition hover:bg-white/15"
+              className="ml-2 hidden rounded-lg bg-white/10 px-3.5 py-1.5 font-medium text-ink ring-1 ring-white/15 transition hover:bg-white/15 sm:inline-flex"
             >
               Enter a body
             </Link>
