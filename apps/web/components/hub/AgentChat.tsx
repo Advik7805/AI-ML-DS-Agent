@@ -47,7 +47,7 @@ export function AgentChat() {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
-  const [provider, setProvider] = useState<string>("");
+  const [provider, setProvider] = useState<string>("connecting");
   const [note, setNote] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -57,7 +57,10 @@ export function AgentChat() {
         setProvider(info.provider);
         setNote(info.note);
       })
-      .catch(() => setNote("Agent endpoint unreachable."));
+      .catch(() => {
+        setProvider("unavailable");
+        setNote("Agent status unavailable; the API may be waking up.");
+      });
   }, []);
 
   useEffect(() => {
@@ -87,6 +90,7 @@ export function AgentChat() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message, history }),
       });
+      setProvider(res.provider);
       setTurns((t) => [
         ...t,
         {
@@ -118,8 +122,12 @@ export function AgentChat() {
           </span>
           <span className="text-[13px] font-semibold">Hub agent</span>
         </div>
-        <span className="font-mono text-[10px] uppercase tracking-widest text-ink-faint">
-          {provider || "connecting"}
+        <span
+          title={`Active language-model provider: ${provider}`}
+          className="rounded-md border border-line bg-void-3 px-2 py-1 font-mono text-[10px] uppercase tracking-widest text-ink-dim"
+          aria-live="polite"
+        >
+          LLM · {provider}
         </span>
       </div>
 

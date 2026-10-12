@@ -245,6 +245,31 @@ def test_key_present_selects_the_real_provider(monkeypatch) -> None:
     assert isinstance(get_provider(), GeminiProvider)
 
 
+def test_auto_provider_selects_groq_then_gemini_then_mock(monkeypatch) -> None:
+    monkeypatch.delenv("SAROS_LLM", raising=False)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    assert isinstance(get_provider(), MockProvider)
+
+    monkeypatch.setenv("GEMINI_API_KEY", "ai-test")
+    assert isinstance(get_provider(), GeminiProvider)
+
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-test")
+    assert isinstance(get_provider(), GroqProvider)
+
+
+def test_explicit_provider_override_wins_over_auto_key_detection(monkeypatch) -> None:
+    monkeypatch.setenv("SAROS_LLM", "mock")
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-test")
+    assert isinstance(get_provider(), MockProvider)
+
+    # Choosing a vendor explicitly does not silently switch to the other live vendor.
+    monkeypatch.setenv("SAROS_LLM", "groq")
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.setenv("GEMINI_API_KEY", "ai-test")
+    assert isinstance(get_provider(), MockProvider)
+
+
 def test_unknown_provider_falls_back_to_mock(monkeypatch) -> None:
     monkeypatch.setenv("SAROS_LLM", "openai")
     assert isinstance(get_provider(), MockProvider)

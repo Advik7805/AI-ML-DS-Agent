@@ -308,8 +308,9 @@ def agent_info() -> dict[str, Any]:
         "max_iterations": agent.max_iterations,
         "tools": [t.name for t in agent.registry.all_tools()],
         "note": (
-            "Running on the deterministic mock provider. Set SAROS_LLM=groq or "
-            "SAROS_LLM=gemini with the matching API key for real reasoning."
+            "Running on the deterministic mock provider because no supported LLM key is configured "
+            "or the explicitly selected provider key is missing. Set GROQ_API_KEY or GEMINI_API_KEY "
+            "for automatic live selection, or SAROS_LLM=mock to stay offline."
             if agent.provider.name == "mock"
             else None
         ),
