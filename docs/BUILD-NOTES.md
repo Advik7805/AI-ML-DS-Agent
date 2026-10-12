@@ -153,3 +153,72 @@ scraper node did not exist.
 returns status, accent and each body's UI route); the static list survives only as a
 cold-backend fallback. `test_frontend_body_mirror_matches_the_registry` fails the build if the
 mirror's ids or hrefs ever drift from the registry again.
+
+## 8. The whole UI was decorative, and nothing said so
+
+**Symptom:** "only able to select churn and retention and not able to add any file" — and in
+general: pages that look completely finished, where clicking a body chip, a sample question or
+the file drop-zone does nothing at all. No error, no toast, no console message. `curl` returned a
+complete 200 with the right HTML; every API route answered; the Python suite was green.
+
+**Cause:** `next dev`, served behind a preview host. Next 16 refuses to hand its *dev* resources
+to an origin it does not recognise, so `/_next/hmr` was answered with
+`Blocked cross-origin request … To allow this host in development, add it to "allowedDevOrigins"`.
+The dev client waits on that socket before it hydrates, so React never attached to the DOM: the
+server-rendered HTML stayed on screen, fully styled, entirely inert. The server logged the
+blocked request while the browser logged a WebSocket handshake failure — neither of which
+appears in a screenshot, a `curl`, or a test suite.
+
+**Fix:** `allowedDevOrigins` in `apps/web/next.config.ts` covers localhost, `127.0.0.1`, `0.0.0.0`,
+`*.e2b.app` (the sandbox preview host), `*.vercel.app`, plus anything in `SAROS_DEV_ORIGINS`.
+Nine source-level assertions in `tests/test_frontend_contract.py` keep it there, because this is
+the one bug that makes every feature look broken at once.
+
+**How it was actually found:** by driving a real headless Chromium against the page and asking
+whether the DOM had any React fiber attached, then clicking every visible control and checking
+for a text change *or* an API call. `apps/web/scripts/browser-check.mjs` does exactly that and
+now runs as a pre-deploy gate.
+
+## 9. `GET /api/v1/agent` answered 500 with no explanation
+
+**Symptom:** the chat header's provider badge silently never resolved.
+
+**Cause:** the handler read `os.getenv("SAROS_LLM", "auto")` in a module that never imported `os`.
+A `NameError`, so a 500 — and the frontend's `.catch()` hid it.
+
+**Fix:** the import, plus `tests/test_routes.py`, which walks the app's own OpenAPI schema and
+calls every GET route, failing on any 5xx and on any 4xx that carries an empty `detail`. A
+missing import is not a subtle bug; it was subtle only because nothing called the route.
+
+## 10. A reloaded model card reported zeros as fact
+
+**Symptom:** `GET /api/v1/modules/maintenance/metrics` reported `n_samples: 0, positive_rate: 0.0`
+after a restart, while the model was fine.
+
+**Cause:** the load path rebuilt `MetricsReport` from scratch, and there was nothing to put in it —
+the artifact never stored its evaluation. Retraining was the only way to answer, so the fallback
+was to invent zeros and render them next to the model's real metrics.
+
+**Fix:** trainable bundles now carry the report they were judged by (`core/artifacts.SCHEMA` 2 → 3,
+so older pickles retrain instead of half-loading). Measured: `get_maintenance_model_metrics` went
+from `n_samples: 0` to `24,178 / 12.8% positive` in 2 ms, and churn's metric call stopped
+retraining the model on first use (2.3 s saved). Guarded by `tests/test_model_card.py`.
+
+## 11. Six tool-console defects found by calling every tool
+
+A sweep of all 22 tools over HTTP, with the exact arguments the UI prefills, produced six
+"the button does nothing" bugs — all now fixed and covered by `tests/test_tools_callable.py`,
+which mirrors the console's own default-argument logic:
+
+- A renamed or unknown argument returned `500 {"detail": ""}` (an escaped `TypeError`). Tool
+  dispatch now validates against the tool's own JSON Schema and answers with the accepted names.
+- `scrape_url`, `web_search`, `extract_url`, `render_url`, `search_knowledge` and `optimise_price`
+  answered 422 to a *prefilled* console, because an empty string is not a URL or a SKU. Tool
+  schemas now carry `examples`, which is what the console prefers.
+- `extract_url` iterated a single URL string character by character.
+- `assess_diabetes_risk` reported pandas' "could not convert string to float: 'sample'" with no
+  field named.
+- The RAG console's tool `<select>` could render empty with no explanation; options were also
+  unreadable on the dark surface.
+- The tool console called `/explain` on bodies that ship no explainer (pricing, scraper), logging
+  422s for a request that could never succeed.
