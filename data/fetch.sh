@@ -64,7 +64,7 @@ echo "Fetching datasets:"
 # Telecom churn — 3,333 rows, 20 columns, 14.5% positive rate. Used by modules/churn.
 fetch_github_file "ywchiu/python_for_data_science" "Data/customer_churn.csv" "data/raw/telco_churn.csv"
 
-# Pima Indians diabetes — 200 rows x 9 columns, target `diabetes`. Used by modules/xai_health.
+# Pima Indians diabetes — 768 rows x 9 columns, target `diabetes`. Used by modules/xai_health.
 # Zero is a missing-value sentinel for glucose, blood pressure, skin thickness, insulin and BMI;
 # the body converts those to NaN before training.
 fetch_github_file "bigmlcom/python" "data/diabetes.csv" "data/raw/diabetes.csv"

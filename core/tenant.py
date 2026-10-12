@@ -270,14 +270,18 @@ DATASETS: dict[str, dict[str, Any]] = {
     },
     "xai_health": {
         "dataset": "Employee health screening pilot",
-        "rows": 768,
+        # The file data/fetch.sh pulls is the 200-row sample of the study, not all 768 records —
+        # and the card says what the loader actually read, so this has to be the sample size.
+        "rows": 200,
         "grain": "one row per screened employee",
         "key": "screening_id",
         "target": "diabetes_risk — screening outcome, triaged for follow-up",
         "period": "annual screening cycle",
         "origin": "public-dataset",
         "origin_detail": (
-            "Pima Indians Diabetes study (768 records, 9 columns) — a real, public, citable "
+            "Pima Indians Diabetes study — the 200-row sample of it that data/fetch.sh pulls "
+            "(the full study has 768 records; the 200 fetched here is what these metrics are "
+            "computed on, which is why the held-out set is small). A real, public, citable "
             "dataset, used as the clinical stand-in for Northwind Care's screening pilot. Zero "
             "is a missing-value sentinel in five of its columns and is imputed, not averaged."
         ),
@@ -302,6 +306,13 @@ DATASETS: dict[str, dict[str, Any]] = {
         ],
     },
 }
+
+#: Loader source strings that mean the named public dataset was actually read from disk.
+#: Anything else — notably ``"synthetic"`` — means a generator stood in, and the card must stop
+#: claiming the real file is behind the numbers. The three real datasets here are only real when
+#: their file is present: a fresh clone, CI and a fresh deploy all run the generator.
+LIVE_SOURCES = frozenset({"real", "pima", "cmapss-fd001"})
+
 
 #: What a body says when it has no dataset of its own.
 NO_DATASET = DatasetCard(
@@ -350,6 +361,28 @@ def dataset_for(module_id: str, **runtime: Any) -> DatasetCard:
         observed_basis=observed_basis,
         **static,
     )
+
+    # The badge has to describe what is loaded, not what is intended. The maintenance body is
+    # built for NASA CMAPSS FD001, but with no file present it trains on a generator — and the
+    # card was still showing "real public dataset" next to it, which is the one claim this whole
+    # registry exists to prevent. So the origin follows the loader's own report.
+    if (
+        card.origin == "public-dataset"
+        and card.observed_source
+        and card.observed_source not in LIVE_SOURCES
+    ):
+        card = card.model_copy(
+            update={
+                "origin": "generated",
+                "origin_detail": (
+                    f"Running on generated data right now — the loader reports source "
+                    f"'{card.observed_source}', so the file below is absent and a seeded generator "
+                    f"with the same schema and correlation structure stands in. The dataset named "
+                    f"here is what this body is built for, and the model switches to it as soon as "
+                    f"the file is present. {card.origin_detail}"
+                ),
+            }
+        )
     return card
 
 

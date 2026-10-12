@@ -2,6 +2,33 @@
 
 > One hub. Many independent bodies. Every body a real, working system.
 
+[![CI](https://github.com/Advik7805/AI-ML-DS-Agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Advik7805/AI-ML-DS-Agent/actions/workflows/ci.yml)
+[![Live app](https://img.shields.io/badge/live-ai--ml--ds--agent.vercel.app-000000?logo=vercel&logoColor=white)](https://ai-ml-ds-agent.vercel.app)
+[![API](https://img.shields.io/badge/api-saros--api.onrender.com-46E3B7?logo=render&logoColor=white)](https://saros-api.onrender.com/docs)
+
+|  |  |
+|---|---|
+| **App** | **<https://ai-ml-ds-agent.vercel.app>** |
+| **API + interactive docs** | <https://saros-api.onrender.com/docs> |
+| **Health** | <https://saros-api.onrender.com/health> |
+| **Source** | <https://github.com/Advik7805/AI-ML-DS-Agent> |
+
+**The first visit can take ~60 s.** The API runs on Render's free tier and sleeps after 15 minutes
+idle; the UI says *"waking the API…"* and retries on its own rather than showing an error, and the
+models are trained on a background thread while the API serves, so only that first request is slow.
+Keep it warm with the [`keep-alive`](.github/workflows/keep-alive.yml) workflow (it pings
+`/health` every 10 minutes, inside the idle window, at zero cost).
+
+**Three things to try first**
+
+1. **Ask the agent** on the hub: *"Rank the top 5 customers most likely to churn"* — it plans,
+   calls the tools and shows its trace.
+2. **Drop your own file** under *Your data* (CSV, CMAPSS telemetry, `.md`/`.txt`/`.pdf`), then ask
+   about it in the same conversation. In memory, capped at 10 MB, never written to disk.
+3. **Open any body** and run its tools by hand in the console — all 22 are callable from the UI.
+
+Everything the app can do, with the commands to do it: **[WHAT-YOU-CAN-DO.md](WHAT-YOU-CAN-DO.md)**.
+
 A full-stack platform assembling the toolchain a senior data scientist actually uses into **one
 connected product**: a multimodal agent hub that reasons across specialist bodies — RAG
 knowledge assistants, real-time fraud and anomaly detection, predictive maintenance,
@@ -24,15 +51,15 @@ and identity — while connecting to the hub through one shared contract.
 
 | Body | Route | Data | Headline result |
 |---|---|---|---|
-| Churn & retention | `/churn` | real telecom, 834 held-out | PR-AUC **0.677** vs 0.145 → **4.67× lift** |
-| Fraud & anomaly | `/fraud` | synthetic, 5,000 held-out | PR-AUC **0.608** vs 0.010 → **59.6× lift**, FPR 0.0002 |
-| Predictive maintenance | `/maintenance` | synthetic CMAPSS-compatible | R² **0.816**, MAE 12.23 cycles (GroupKFold by engine) |
-| Dynamic pricing | `/pricing` | synthetic point-of-sale | 22/24 SKUs with identified elasticity |
-| Explainable diagnostics | `/diagnostics` | real Pima diabetes | ROC-AUC 0.690; fairness gap **0.208** flagged |
-| Knowledge RAG | `/rag` | 7-doc policy corpus | hit@1 **0.833**, 35 passages, or your own file |
-| Web scraper | `/scraper` | mock by default | host-allowlisted, size-capped |
+| Churn & retention | [`/churn`](https://ai-ml-ds-agent.vercel.app/churn) | real telecom, 834 held-out | PR-AUC **0.677** vs 0.145 → **4.67× lift** |
+| Fraud & anomaly | [`/fraud`](https://ai-ml-ds-agent.vercel.app/fraud) | synthetic, 5,000 held-out | PR-AUC **0.608** vs 0.010 → **59.6× lift**, FPR 0.0002 |
+| Predictive maintenance | [`/maintenance`](https://ai-ml-ds-agent.vercel.app/maintenance) | synthetic CMAPSS-compatible | R² **0.816**, MAE 12.23 cycles (GroupKFold by engine) |
+| Dynamic pricing | [`/pricing`](https://ai-ml-ds-agent.vercel.app/pricing) | synthetic point-of-sale | 22/24 SKUs with identified elasticity |
+| Explainable diagnostics | [`/diagnostics`](https://ai-ml-ds-agent.vercel.app/diagnostics) | real Pima sample, 200 rows (60 held out) | ROC-AUC 0.690; fairness gap **0.208** flagged |
+| Knowledge RAG | [`/rag`](https://ai-ml-ds-agent.vercel.app/rag) | 7-doc policy corpus | hit@1 **0.833**, 35 passages, or your own file |
+| Web scraper | [`/scraper`](https://ai-ml-ds-agent.vercel.app/scraper) | mock by default | host-allowlisted, size-capped |
 
-**309 tests passing** (`python3 -m pytest -q`), across thirteen suites: contract conformance,
+**310 tests passing** (`python3 -m pytest -q`), across thirteen suites: contract conformance,
 per-body model quality, the gateway over HTTP, file upload, warm-up, model-card provenance,
 tool callability, HTTP route coverage, frontend contracts, integrations, the LLM providers, explainer selection, experiment tracking and
 orchestration, and the churn body. **22 tools** register into one registry, names globally
@@ -60,10 +87,15 @@ background thread. Measured on a genuinely cold start (artifacts deleted):
 **One company, seven bodies.** Every body names the enterprise it belongs to, the dataset it
 scores, the row grain, the join key and the system of record, in `core/tenant.py` and on the page
 itself. Nothing is unattributed and nothing is misattributed: three datasets are real and public
-(IBM Telco Customer Churn, NASA CMAPSS FD001, Pima Indians Diabetes) with their true row counts,
+(IBM Telco Customer Churn; NASA CMAPSS FD001; Pima Indians Diabetes — as the 200-row sample the
+fetcher pulls, not the full 768-record study) with the row count the loader actually read,
 four are generated and labelled as generated, and the tenant is a named, explicitly **fictional**
-company — attributing public data to a real named corporation would be a fabrication. Full
-rationale: [`core/tenant.py`](core/tenant.py).
+company — attributing public data to a real named corporation would be a fabrication.
+
+The badge follows the loader rather than the intention: a fresh clone, CI and a fresh deploy have
+no `data/raw/` file, so those bodies train on the shipped generator and their card reads
+**generated (stand-in)** — naming the dataset they are *built for* and the file that switches them
+to it — instead of borrowing the citable name. Full rationale: [`core/tenant.py`](core/tenant.py).
 
 Results are read from the live gateway, not a notebook — e.g.
 `GET /api/v1/modules/churn/metrics` and `GET /api/v1/agent/tools`.
@@ -175,7 +207,7 @@ deploy/          API Dockerfile · supabase_schema.sql
 ```bash
 pip install -r requirements.txt
 bash data/fetch.sh                    # real dataset; optional — synthetic fallback works
-python -m pytest                      # 309 tests
+python -m pytest                      # 310 tests
 python -m modules.churn.train         # held-out metrics
 uvicorn apps.api.main:app --reload    # http://localhost:8000/docs
 ```
@@ -188,6 +220,18 @@ cd apps/web && npm install && npm run dev    # http://localhost:3000
 
 The browser only ever speaks to the Next.js origin; `next.config.ts` proxies `/api` to the
 backend, which is what makes it work behind a preview host with no CORS.
+
+**Verify a running instance in a browser, not with curl** — a page can return a perfect 200 and
+still be inert if it never hydrates (see [BUILD-NOTES.md](docs/BUILD-NOTES.md) note 8):
+
+```bash
+cd apps/web
+npm install --no-save puppeteer-core @sparticuz/chromium
+BASE=https://ai-ml-ds-agent.vercel.app node scripts/browser-check.mjs
+```
+
+It loads all eight routes, checks each one hydrated and made no failing API call, clicks through
+every body in the upload studio, and analyses a file if you give it one (`FILE=/path/to.csv`).
 
 ---
 
@@ -267,7 +311,8 @@ and spending a one-time allowance on something free elsewhere is a bad trade.
 | [`docs/RESEARCH.md`](docs/RESEARCH.md) | Every relevant repo, with verified star counts and activity dates. What to build on, what to read, what to avoid. |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | The contract, the storefront topology (with the Next.js mechanism verified against source), the 3D brief, the phased plan. |
 | [`docs/DEPLOY.md`](docs/DEPLOY.md) | The $0 runbook: Render blueprint, Vercel import, keep-alive, and which integrations to enable first. |
-| [`docs/BUILD-NOTES.md`](docs/BUILD-NOTES.md) | Five real defects the test suite caught — calibration leakage, score flattening, a SHAP/explained-model mismatch, and more. |
+| [`docs/BUILD-NOTES.md`](docs/BUILD-NOTES.md) | Eleven real defects, with the evidence — calibration leakage, score flattening, a SHAP/explained-model mismatch, a deploy image training on the wrong data, a page that never hydrated, and more. |
+| [`WHAT-YOU-CAN-DO.md`](WHAT-YOU-CAN-DO.md) | Everything the running app can do, written from the verification runs rather than the feature list. |
 
 ---
 
