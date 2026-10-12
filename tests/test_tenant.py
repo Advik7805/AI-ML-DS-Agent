@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from apps.api.main import app, registry
-from core.tenant import DATASETS, TENANT, asset_id, auth_id, customer_id, sku_id
+from core.tenant import DATASETS, LIVE_SOURCES, TENANT, asset_id, auth_id, customer_id, sku_id
 
 ALLOWED_ORIGINS = {"public-dataset", "generated", "corpus", "uploaded", "none"}
 
@@ -207,5 +207,40 @@ def test_dataset_endpoint_404s_for_an_unknown_body(client) -> None:
 
 def test_module_listing_includes_provenance(client) -> None:
     churn = next(m for m in client.get("/api/v1/modules").json() if m["id"] == "churn")
-    assert churn["dataset"]["origin"] == "public-dataset"
-    assert churn["dataset"]["origin_url"].startswith("http")
+    card = churn["dataset"]
+    # The dataset is named either way, so the citable source is always there to click.
+    assert card["origin_url"] == DATASETS["churn"]["origin_url"]
+    assert card["origin_url"].startswith("http")
+    # And the badge describes what is loaded, not what is intended.
+    assert card["origin"] == (
+        "public-dataset"
+        if card["observed_source"] in LIVE_SOURCES
+        else "generated"
+    ), f"origin={card['origin']!r} while loading {card['observed_source']!r}"
+
+
+def test_no_body_claims_a_public_dataset_while_running_on_the_generator(registry) -> None:
+    """The bug this locks out: maintenance trained on generated telemetry and still showed
+    "real public dataset", because the origin was a static string rather than a function of what
+    the loader actually read. A fresh clone, CI, and a fresh deploy all run the generator, so this
+    is the *normal* path, not an edge case."""
+    checked = 0
+    for module in registry.all():
+        if hasattr(type(module), "bundle"):
+            _ = module.bundle  # force the loader so observed_source is populated
+        card = module.dataset_card()
+        if not card.observed_source:
+            continue
+        checked += 1
+        if card.observed_source in LIVE_SOURCES:
+            continue
+        assert card.origin != "public-dataset", (
+            f"{card.module_id} claims the public dataset while loading '{card.observed_source}'"
+        )
+        # Only the datasets that *have* a public original get the explanatory downgrade; a body
+        # that was always generated (fraud, pricing) says so in its own words.
+        if DATASETS.get(card.module_id, {}).get("origin") == "public-dataset":
+            assert "generated" in card.origin_detail.lower(), (
+                f"{card.module_id} downgraded its origin without saying why"
+            )
+    assert checked, "no body reported what it loaded, so this test proved nothing"

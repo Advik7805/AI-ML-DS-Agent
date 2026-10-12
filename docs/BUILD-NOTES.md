@@ -222,3 +222,30 @@ which mirrors the console's own default-argument logic:
   unreadable on the dark surface.
 - The tool console called `/explain` on bodies that ship no explainer (pricing, scraper), logging
   422s for a request that could never succeed.
+
+## 12. A body trained on generated data still showed "real public dataset"
+
+**Symptom:** the hub's tile for predictive maintenance read *"Engine telemetry (NASA CMAPSS-shaped)
+— real public dataset — 20,631 rows"* while the same body's metrics reported
+`data_source: synthetic`. Two statements, one screen, one of them untrue.
+
+**Cause:** `origin` was a static string in the tenant registry — what the body is *built for* —
+while the loader's own report (`source: "synthetic" | "cmapss-fd001" | "real"`) was carried in a
+separate `observed_source` field further down the card, and the badge above it never consulted it.
+Since a fresh clone, CI and a fresh deploy have no `data/raw/`, the generator is the *normal* path,
+not an edge case — so the usual state of the deployed app was claiming a NASA dataset it was not
+using.
+
+**Fix:** `core/tenant.py` now derives the badge from the loader: if the observed source is not one
+of `real` / `pima` / `cmapss-fd001`, the origin becomes `generated` and the detail explains why,
+naming the file that switches it back. The provenance card prints the loaded source next to the row
+count, where a reader decides whether these are the citable numbers.
+
+`test_no_body_claims_a_public_dataset_while_running_on_the_generator` forces each body's loader and
+fails if any card claims a public dataset while running on synthetic data — the assertion that would
+have caught the original inconsistency.
+
+**Follow-up found while fixing that:** the diagnostics body's registry entry claimed the full Pima
+study (768 records) while `data/fetch.sh` pulls a 200-row sample of it, so the card promised a
+row count the file never had and the held-out set was 60 patients. The card now states the sample
+size, and says the full study is 768 — the number is smaller, and true.

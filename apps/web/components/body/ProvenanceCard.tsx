@@ -82,7 +82,12 @@ export function ProvenanceCard({ moduleId, accent }: { moduleId: string; accent:
             label="Rows"
             value={
               rows
-                ? `${rows.toLocaleString()}${basis ? ` · ${basis}` : ""}`
+                ? `${rows.toLocaleString()}${basis ? ` · ${basis}` : ""}${
+                    // The loader's own word for what it read — "real", "synthetic", "cmapss-fd001".
+                    // Printed next to the row count because that is where a reader looks when
+                    // deciding whether these numbers are the citable ones.
+                    card?.observed_source ? ` · ${card.observed_source}` : ""
+                  }`
                 : "n/a"
             }
           />
