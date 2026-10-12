@@ -86,7 +86,7 @@ see note 8 in [BUILD-NOTES.md](BUILD-NOTES.md) — so there is a script for it:
 ```bash
 cd apps/web
 npm install --no-save puppeteer-core @sparticuz/chromium
-BASE=https://your-app.vercel.app node scripts/browser-check.mjs
+BASE=https://saros-hub.vercel.app node scripts/browser-check.mjs   # the live app; use your own URL for a fork
 ```
 
 It loads all eight routes, asserts each one hydrates and makes no failing API call, clicks through
