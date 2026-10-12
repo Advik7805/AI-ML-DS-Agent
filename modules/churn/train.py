@@ -63,6 +63,10 @@ class ChurnModel:
     source: str = "synthetic"
     trained_at: str = ""
     n_train: int = 0
+    #: The evaluation this bundle was judged by, carried with the model. Without it a reload can
+    #: only retrain or report zeros — and a model card that shows n_samples=0 is worse than a
+    #: slow one, because it is wrong.
+    report: "MetricsReport | None" = None
     #: Full source-frame size, so the provenance card can report rows read rather than rows fitted.
     n_rows: int = 0
     base_rate: float = 0.0
@@ -300,6 +304,7 @@ def train_churn(
         threshold=bundle.threshold,
         notes=notes,
     )
+    bundle.report = report
     return bundle, report
 
 

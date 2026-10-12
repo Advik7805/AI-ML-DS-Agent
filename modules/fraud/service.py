@@ -50,6 +50,7 @@ class FraudModule(Module):
                 if self._bundle is None:
                     try:
                         self._bundle = FraudModel.load()
+                        self._report = self._bundle.report
                     except Exception:  # noqa: BLE001 - no artifact yet
                         self._bundle, self._report = train_fraud()
                         self._bundle.save()

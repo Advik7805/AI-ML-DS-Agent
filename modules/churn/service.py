@@ -52,6 +52,7 @@ class ChurnModule(Module):
                 if self._bundle is None:
                     try:
                         self._bundle = ChurnModel.load()
+                        self._report = self._bundle.report
                     except Exception:  # noqa: BLE001 - no artifact yet, or stale pickle
                         self._bundle, self._report = train_churn()
                         self._bundle.save()

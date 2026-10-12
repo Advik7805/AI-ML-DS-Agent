@@ -364,7 +364,13 @@ class ScraperModule(Module):
                 module_id=self.id,
                 parameters_schema={
                     "type": "object",
-                    "properties": {"url": {"type": "string", "description": "Absolute http(s) URL."}},
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "description": "Absolute http(s) URL.",
+                            "examples": ["https://example.com"],
+                        }
+                    },
                     "required": ["url"],
                 },
             ),
@@ -379,7 +385,11 @@ class ScraperModule(Module):
                 parameters_schema={
                     "type": "object",
                     "properties": {
-                        "query": {"type": "string", "description": "The search query."},
+                        "query": {
+                            "type": "string",
+                            "description": "The search query.",
+                            "examples": ["on-premise AI deployment costs"],
+                        },
                         "max_results": {"type": "integer", "description": "Up to 20; costs 1 credit."},
                         "topic": {
                             "type": "string",
@@ -410,6 +420,7 @@ class ScraperModule(Module):
                             "type": "array",
                             "items": {"type": "string"},
                             "description": "Absolute http(s) URLs, max 5 per call.",
+                            "examples": [["https://example.com"]],
                         }
                     },
                     "required": ["urls"],
@@ -427,7 +438,11 @@ class ScraperModule(Module):
                 parameters_schema={
                     "type": "object",
                     "properties": {
-                        "url": {"type": "string", "description": "Absolute http(s) URL."},
+                        "url": {
+                            "type": "string",
+                            "description": "Absolute http(s) URL.",
+                            "examples": ["https://example.com"],
+                        },
                         "wait_for": {
                             "type": "integer",
                             "description": "Milliseconds to wait for JS to settle. Default 0.",
@@ -482,8 +497,12 @@ class ScraperModule(Module):
                 r["content"] = r["content"][:600]
         return out
 
-    def tool_extract_url(self, urls: list[str]) -> dict[str, Any]:
+    def tool_extract_url(self, urls: list[str] | str) -> dict[str, Any]:
         client = get_client()
+        # `extract_url` is called by hand as often as by the agent, and one URL passed as a bare
+        # string is the usual mistake. Iterating a string yields characters, so normalise first.
+        if isinstance(urls, str):
+            urls = [urls]
         cleaned = [str(u).strip() for u in (urls or []) if str(u).strip()][:5]
         if not cleaned:
             raise ValueError("Missing required features: urls")

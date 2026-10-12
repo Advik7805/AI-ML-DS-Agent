@@ -474,7 +474,13 @@ class PricingModule(Module):
                 parameters_schema={
                     "type": "object",
                     "properties": {
-                        "sku": {"type": "string", "description": "SKU id, e.g. SKU-007"},
+                        "sku": {
+                            "type": "string",
+                            "description": "SKU id, e.g. SKU-007",
+                            # The Tool console prefills from `examples`, so a click on "Run tool"
+                            # must produce a real quote rather than an "Unknown SKU ''" 422.
+                            "examples": ["SKU-007"],
+                        },
                         "min_demand_share": {"type": "number", "default": 0.8},
                     },
                     "required": ["sku"],

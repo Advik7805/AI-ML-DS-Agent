@@ -41,6 +41,8 @@ class RulModel:
     #: Full source-frame size, so the provenance card can report rows read, not just rows fitted.
     n_rows: int = 0
     notes: list[str] = field(default_factory=list)
+    #: The evaluation this bundle was judged by, carried with the model (see core/artifacts).
+    report: "MetricsReport | None" = None
     #: Training distribution per feature, so incoming telemetry can be checked for drift.
     reference: dict = field(default_factory=dict)
 
@@ -137,6 +139,7 @@ def train_rul(*, random_state: int = 11) -> tuple[RulModel, MetricsReport]:
         scores=scores,
         notes=[*notes, *(f"MAE in {k}: {v:.2f} cycles." for k, v in band_mae.items())],
     )
+    bundle.report = report
     return bundle, report
 
 
@@ -155,10 +158,11 @@ class MaintenanceModule(Module):
                 if self._bundle is None:
                     try:
                         self._bundle = RulModel.load()
-                        self._report = MetricsReport(
-                            n_samples=0, positive_rate=0.0, scores=self._bundle.metrics,
-                            notes=self._bundle.notes,
-                        )
+                        # Restore the evaluation the bundle was trained under. It used to be
+                        # rebuilt here as n_samples=0 / positive_rate=0.0, which the model card
+                        # then displayed as fact. `None` is handled by `evaluate()`, which
+                        # retrains rather than inventing numbers.
+                        self._report = self._bundle.report
                     except Exception:  # noqa: BLE001
                         self._bundle, self._report = train_rul()
                         self._bundle.save()

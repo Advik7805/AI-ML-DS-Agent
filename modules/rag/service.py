@@ -327,7 +327,11 @@ class RagModule(Module):
                 parameters_schema={
                     "type": "object",
                     "properties": {
-                        "query": {"type": "string", "description": "What to look for."},
+                        "query": {
+                            "type": "string",
+                            "description": "What to look for.",
+                            "examples": ["how is the churn model evaluated?"],
+                        },
                         "k": {"type": "integer", "description": "Passages to return.", "default": 5},
                     },
                     "required": ["query"],

@@ -40,6 +40,8 @@ class FraudModel:
     n_train: int = 0
     n_rows: int = 0
     base_rate: float = 0.0
+    #: The evaluation this bundle was judged by, carried with the model (see core/artifacts).
+    report: "MetricsReport | None" = None
     notes: list[str] = field(default_factory=list)
     #: Training distribution per feature, retained so incoming batches can be compared against
     #: it. Drift detection is meaningless without a fixed reference frame.
@@ -215,6 +217,7 @@ def train_fraud(*, n: int = 20000, random_state: int = 7) -> tuple[FraudModel, M
         threshold=bundle.threshold,
         notes=notes,
     )
+    bundle.report = report
     return bundle, report
 
 

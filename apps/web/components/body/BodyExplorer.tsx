@@ -50,6 +50,9 @@ export function BodyExplorer({ moduleId, accent }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [raw, setRaw] = useState<string>("");
+  // Elapsed seconds for the running tool. The first call on a cold instance can train a model,
+  // and a button that says "Running…" for 14 seconds with no movement reads as a hang.
+  const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
     clientFetch<ModuleManifest>(`/api/v1/modules/${moduleId}`)
@@ -85,6 +88,8 @@ export function BodyExplorer({ moduleId, accent }: Props) {
   const run = useCallback(async () => {
     if (!tool) return;
     setBusy(true);
+    setElapsed(0);
+    const tick = setInterval(() => setElapsed((e) => e + 0.1), 100);
     setError(null);
     setResult(null);
     setPrediction(null);
@@ -117,6 +122,7 @@ export function BodyExplorer({ moduleId, accent }: Props) {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
+      clearInterval(tick);
       setBusy(false);
     }
   }, [tool, args, moduleId]);
@@ -204,8 +210,9 @@ export function BodyExplorer({ moduleId, accent }: Props) {
           )}
 
           {metricsError && (
-            <div className="mt-3 rounded-xl border border-churn/30 bg-churn/10 p-4 text-[12.5px] text-ink">
-              Model card unavailable: {metricsError}. The console below still works.
+            <div className="mt-3 rounded-xl border border-churn/30 bg-churn/10 p-4 text-[12.5px] leading-relaxed text-ink">
+              Model card unavailable: {metricsError}. The console below still works — and if the
+              API is asleep, it wakes on its own after ~10s of retrying.
             </div>
           )}
         </section>
@@ -216,21 +223,31 @@ export function BodyExplorer({ moduleId, accent }: Props) {
         <div className="grid gap-5 lg:grid-cols-[380px_minmax(0,1fr)]">
           <div className="rounded-2xl border border-line bg-void-3 p-5 shadow-sm">
             <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-ink-faint">Tool</div>
-            <select
-              value={toolName}
-              onChange={(e) => {
-                const t = manifest?.tools.find((x) => x.name === e.target.value);
-                setToolName(e.target.value);
-                if (t) setArgs(defaultArgs(t));
-              }}
-              className="mt-1.5 w-full rounded-md border border-line bg-void-3 px-2.5 py-1.5 font-mono text-[12px]"
-            >
-              {(manifest?.tools ?? []).map((t) => (
-                <option key={t.name} value={t.name}>
-                  {t.name}
-                </option>
-              ))}
-            </select>
+            {manifest === null ? (
+              <div className="mt-1.5 w-full rounded-md border border-line bg-void-3 px-2.5 py-1.5 font-mono text-[12px] text-ink-faint">
+                loading tools…
+              </div>
+            ) : manifest.tools.length === 0 ? (
+              <div className="mt-1.5 w-full rounded-md border border-line bg-void-3 px-2.5 py-1.5 font-mono text-[12px] text-ink-faint">
+                no tools registered for this body
+              </div>
+            ) : (
+              <select
+                value={toolName}
+                onChange={(e) => {
+                  const t = manifest.tools.find((x) => x.name === e.target.value);
+                  setToolName(e.target.value);
+                  if (t) setArgs(defaultArgs(t));
+                }}
+                className="mt-1.5 w-full rounded-md border border-line bg-void-3 px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none focus:border-hub/60"
+              >
+                {manifest.tools.map((t) => (
+                  <option key={t.name} value={t.name} className="bg-void-3 text-ink">
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            )}
 
             {tool && <p className="mt-2.5 text-[11.5px] leading-relaxed text-ink-dim">{tool.description}</p>}
 
@@ -263,11 +280,17 @@ export function BodyExplorer({ moduleId, accent }: Props) {
               className="mt-4 w-full rounded-lg py-2 text-[13px] font-medium text-white transition disabled:opacity-50"
               style={{ background: accent }}
             >
-              {busy ? "Running…" : "Run tool"}
+              {busy ? `Running… ${elapsed.toFixed(1)}s` : "Run tool"}
             </button>
             <p className="mt-2 text-center font-mono text-[10px] text-ink-faint">
               POST /api/v1/agent/tools/{toolName}
             </p>
+            {busy && elapsed > 4 && (
+              <p className="mt-2 text-center text-[10.5px] leading-relaxed text-ink-faint">
+                Still working. A cold instance trains the body&rsquo;s model on first use — the
+                startup warm-up normally has it ready before you are.
+              </p>
+            )}
           </div>
 
           <div className="space-y-4">

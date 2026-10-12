@@ -204,7 +204,30 @@ class Module(ABC):
         if handler is None or not callable(handler):
             available = ", ".join(t.name for t in self.tools()) or "none"
             raise KeyError(f"{self.id} has no tool '{name}'. Available: {available}")
-        return handler(**arguments)
+
+        # Check the call against the published schema *before* dispatch, so a typo in an argument
+        # name comes back as "you sent X, it accepts Y" rather than an unhandled TypeError.
+        tool = next((t for t in self.tools() if t.name == name), None)
+        schema = (tool.parameters_schema if tool is not None else None) or {}
+        props = schema.get("properties") or {}
+        accepts = ", ".join(props) or "no arguments"
+        missing = [k for k in (schema.get("required") or []) if k not in arguments]
+        if missing:
+            raise ValueError(
+                f"{name} is missing required argument(s): {', '.join(missing)}. "
+                f"It accepts: {accepts}."
+            )
+        if props:
+            unknown = [k for k in arguments if k not in props]
+            if unknown:
+                raise ValueError(
+                    f"{name} got argument(s) it does not define: {', '.join(unknown)}. "
+                    f"It accepts: {accepts}."
+                )
+        try:
+            return handler(**arguments)
+        except TypeError as exc:
+            raise ValueError(f"{name} could not bind its arguments ({exc}). It accepts: {accepts}.") from None
 
 
 class ModuleRegistry:

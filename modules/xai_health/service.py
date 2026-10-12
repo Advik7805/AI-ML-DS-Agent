@@ -55,12 +55,26 @@ class HealthModel:
     #: Full source-frame size, for the provenance card.
     n_rows: int = 0
     notes: list[str] = field(default_factory=list)
+    #: The evaluation this bundle was judged by, carried with the model (see core/artifacts).
+    report: "MetricsReport | None" = None
 
     def frame(self, payload: dict[str, Any]) -> pd.DataFrame:
         missing = [f for f in self.feature_names if f not in payload]
         if missing:
             raise ValueError(f"Missing required features: {', '.join(missing)}")
-        row = {f: (np.nan if payload[f] is None else float(payload[f])) for f in self.feature_names}
+        row: dict[str, float] = {}
+        not_numeric: list[str] = []
+        for f in self.feature_names:
+            value = payload[f]
+            if value is None:
+                row[f] = np.nan
+                continue
+            try:
+                row[f] = float(value)
+            except (TypeError, ValueError):
+                not_numeric.append(f)
+        if not_numeric:
+            raise ValueError(f"These features must be numbers: {', '.join(not_numeric)}")
         return pd.DataFrame([row], columns=self.feature_names)
 
     def predict_proba(self, payload: dict[str, Any]) -> float:
@@ -195,6 +209,7 @@ def train_health(*, random_state: int = 5) -> tuple[HealthModel, MetricsReport]:
         group_basis="age band (a proxy — this dataset has no race or gender field)",
     )
     bundle.metrics = scores
+    bundle.report = report
     return bundle, report
 
 
@@ -213,6 +228,9 @@ class XaiHealthModule(Module):
                 if self._bundle is None:
                     try:
                         self._bundle = HealthModel.load()
+                        # Restore the evaluation this model was judged by instead of retraining
+                        # on first /metrics (see core/artifacts).
+                        self._report = self._bundle.report
                     except Exception:  # noqa: BLE001
                         self._bundle, self._report = train_health()
                         self._bundle.save()
