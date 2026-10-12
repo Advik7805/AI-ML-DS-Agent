@@ -249,3 +249,32 @@ have caught the original inconsistency.
 study (768 records) while `data/fetch.sh` pulls a 200-row sample of it, so the card promised a
 row count the file never had and the held-out set was 60 patients. The card now states the sample
 size, and says the full study is 768 — the number is smaller, and true.
+
+## 13. Every live link in the README pointed at a deleted deployment
+
+**Symptom:** the README opened with the app's URL, and every body row linked into it — and the
+app's host answered Vercel's `404 DEPLOYMENT_NOT_FOUND`. The Vercel project had been renamed
+(`ai-ml-ds-agent` → `saros-hub`), which retires the old `<project>.vercel.app` production alias.
+CI stayed green, the app itself was fine, and nothing inside the repo could notice: no test fetches
+the URL, and a dead alias answers with a complete HTML error page rather than a DNS failure, so
+even a curl that checks *something came back* would pass.
+
+**Cause:** the URL was written into prose, a shields.io badge and an example command once, then
+copied. A rename on the platform side is invisible to every check that stays inside the repository,
+which is why the failure surfaced as a user-reported 404 rather than as a red build.
+
+**Fix:** all ten occurrences across `README.md` (the App row, the seven body links, the badge and
+the browser-check command) now point at `https://saros-hub.vercel.app`, checked against the host
+itself:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' https://saros-hub.vercel.app      # 200
+curl -s -o /dev/null -w '%{http_code}\n' https://ai-ml-ds-agent.vercel.app # 404
+```
+
+One of the ten is not a URL: the shields badge *label* encodes the host as
+`live-saros--hub.vercel.app`, with the host's dashes doubled, because shields.io renders a single
+`-` as a space in the label. A find-and-replace that only rewrites link targets leaves a badge
+reading *"live saros hub.vercel.app"*.
+
+The API link (`https://saros-api.onrender.com`) was checked the same way and needed no change.

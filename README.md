@@ -3,12 +3,12 @@
 > One hub. Many independent bodies. Every body a real, working system.
 
 [![CI](https://github.com/Advik7805/AI-ML-DS-Agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Advik7805/AI-ML-DS-Agent/actions/workflows/ci.yml)
-[![Live app](https://img.shields.io/badge/live-ai--ml--ds--agent.vercel.app-000000?logo=vercel&logoColor=white)](https://ai-ml-ds-agent.vercel.app)
+[![Live app](https://img.shields.io/badge/live-saros--hub.vercel.app-000000?logo=vercel&logoColor=white)](https://saros-hub.vercel.app)
 [![API](https://img.shields.io/badge/api-saros--api.onrender.com-46E3B7?logo=render&logoColor=white)](https://saros-api.onrender.com/docs)
 
 |  |  |
 |---|---|
-| **App** | **<https://ai-ml-ds-agent.vercel.app>** |
+| **App** | **<https://saros-hub.vercel.app>** |
 | **API + interactive docs** | <https://saros-api.onrender.com/docs> |
 | **Health** | <https://saros-api.onrender.com/health> |
 | **Source** | <https://github.com/Advik7805/AI-ML-DS-Agent> |
@@ -51,13 +51,13 @@ and identity — while connecting to the hub through one shared contract.
 
 | Body | Route | Data | Headline result |
 |---|---|---|---|
-| Churn & retention | [`/churn`](https://ai-ml-ds-agent.vercel.app/churn) | real telecom, 834 held-out | PR-AUC **0.677** vs 0.145 → **4.67× lift** |
-| Fraud & anomaly | [`/fraud`](https://ai-ml-ds-agent.vercel.app/fraud) | synthetic, 5,000 held-out | PR-AUC **0.608** vs 0.010 → **59.6× lift**, FPR 0.0002 |
-| Predictive maintenance | [`/maintenance`](https://ai-ml-ds-agent.vercel.app/maintenance) | synthetic CMAPSS-compatible | R² **0.816**, MAE 12.23 cycles (GroupKFold by engine) |
-| Dynamic pricing | [`/pricing`](https://ai-ml-ds-agent.vercel.app/pricing) | synthetic point-of-sale | 22/24 SKUs with identified elasticity |
-| Explainable diagnostics | [`/diagnostics`](https://ai-ml-ds-agent.vercel.app/diagnostics) | real Pima sample, 200 rows (60 held out) | ROC-AUC 0.690; fairness gap **0.208** flagged |
-| Knowledge RAG | [`/rag`](https://ai-ml-ds-agent.vercel.app/rag) | 7-doc policy corpus | hit@1 **0.833**, 35 passages, or your own file |
-| Web scraper | [`/scraper`](https://ai-ml-ds-agent.vercel.app/scraper) | mock by default | host-allowlisted, size-capped |
+| Churn & retention | [`/churn`](https://saros-hub.vercel.app/churn) | real telecom, 834 held-out | PR-AUC **0.677** vs 0.145 → **4.67× lift** |
+| Fraud & anomaly | [`/fraud`](https://saros-hub.vercel.app/fraud) | synthetic, 5,000 held-out | PR-AUC **0.608** vs 0.010 → **59.6× lift**, FPR 0.0002 |
+| Predictive maintenance | [`/maintenance`](https://saros-hub.vercel.app/maintenance) | synthetic CMAPSS-compatible | R² **0.816**, MAE 12.23 cycles (GroupKFold by engine) |
+| Dynamic pricing | [`/pricing`](https://saros-hub.vercel.app/pricing) | synthetic point-of-sale | 22/24 SKUs with identified elasticity |
+| Explainable diagnostics | [`/diagnostics`](https://saros-hub.vercel.app/diagnostics) | real Pima sample, 200 rows (60 held out) | ROC-AUC 0.690; fairness gap **0.208** flagged |
+| Knowledge RAG | [`/rag`](https://saros-hub.vercel.app/rag) | 7-doc policy corpus | hit@1 **0.833**, 35 passages, or your own file |
+| Web scraper | [`/scraper`](https://saros-hub.vercel.app/scraper) | mock by default | host-allowlisted, size-capped |
 
 **310 tests passing** (`python3 -m pytest -q`), across thirteen suites: contract conformance,
 per-body model quality, the gateway over HTTP, file upload, warm-up, model-card provenance,
@@ -227,7 +227,7 @@ still be inert if it never hydrates (see [BUILD-NOTES.md](docs/BUILD-NOTES.md) n
 ```bash
 cd apps/web
 npm install --no-save puppeteer-core @sparticuz/chromium
-BASE=https://ai-ml-ds-agent.vercel.app node scripts/browser-check.mjs
+BASE=https://saros-hub.vercel.app node scripts/browser-check.mjs
 ```
 
 It loads all eight routes, checks each one hydrated and made no failing API call, clicks through
