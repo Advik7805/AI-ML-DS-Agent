@@ -14,9 +14,16 @@ import threading
 from typing import Any
 
 from core.contract import Module
-from core.types import AgentTool, Explanation, FeatureAttribution, MetricsReport, ModuleManifest, Prediction
+from core.types import AgentTool, Explanation, FeatureAttribution, MetricsReport, ModuleManifest, Prediction, UploadAnalysis
+from core.upload_utils import (
+    classification_upload_result,
+    coerce_binary_column,
+    coerce_numeric_columns,
+    read_csv_table,
+    prediction_inputs,
+)
 
-from .data import FEATURES, TARGET, load_telco
+from .data import BINARY_FEATURES, FEATURES, TARGET, load_telco
 from .train import ChurnModel, train_churn
 
 ACCENT = "#f59e0b"
@@ -58,17 +65,82 @@ class ChurnModule(Module):
 
     def train(self, config: dict[str, Any] | None = None) -> MetricsReport:
         config = config or {}
-        bundle, report = train_churn(**config)
-        bundle.save()
-        self._bundle, self._report = bundle, report
+        with self._lock:
+            bundle, report = train_churn(**config)
+            bundle.save()
+            self._bundle, self._report = bundle, report
         return report
 
     def evaluate(self) -> MetricsReport:
         if self._report is None:
-            # Retraining is the only way to get metrics; the artifact does not store them.
+            # Wait for a concurrent startup warm-up before deciding to retrain.
+            _ = self.bundle
+        if self._report is None:
+            # The artifact does not store metrics, so a loaded artifact still needs evaluation.
             self.train()
         assert self._report is not None
         return self._report
+
+    def analyze_upload(
+        self,
+        filename: str | None,
+        content: bytes | None,
+        *,
+        session_id: str | None = None,
+        query: str = "",
+    ) -> UploadAnalysis:
+        del session_id, query
+        if not filename or not filename.lower().endswith(".csv") or content is None:
+            raise ValueError("Churn analysis requires a CSV upload.")
+        expected = [*FEATURES, TARGET]
+        frame = read_csv_table(
+            content,
+            filename,
+            module_id=self.id,
+            expected_columns=expected,
+            optional_columns=[TARGET],
+        )
+        for column in BINARY_FEATURES:
+            frame = coerce_binary_column(frame, column)
+        if TARGET in frame:
+            frame = coerce_binary_column(frame, TARGET)
+            if frame[TARGET].isna().any():
+                raise ValueError(f"Target column '{TARGET}' cannot contain blank values.")
+        frame = coerce_numeric_columns(frame, FEATURES)
+
+        bundle = self.bundle
+        probabilities = bundle.model.predict_proba(frame[list(FEATURES)])[:, 1]
+        predictions: list[Prediction] = []
+        for index, (_, row) in enumerate(frame.iterrows()):
+            score = float(probabilities[index])
+            label, decision = _band(score, bundle.threshold)
+            predictions.append(
+                Prediction(
+                    module_id=self.id,
+                    score=round(score, 4),
+                    label=label,
+                    decision=decision,
+                    inputs=prediction_inputs(row, FEATURES),
+                    meta={
+                        "row_index": index,
+                        "threshold": bundle.threshold,
+                        "base_rate": round(bundle.base_rate, 4),
+                        "model_source": bundle.source,
+                        "uploaded_data": True,
+                    },
+                )
+            )
+        labels = frame[TARGET].astype(int).tolist() if TARGET in frame else None
+        return classification_upload_result(
+            module_id=self.id,
+            filename=filename,
+            n_rows=len(frame),
+            predictions=predictions,
+            threshold=bundle.threshold,
+            target_name=TARGET,
+            labels=labels,
+            model_source=bundle.source,
+        )
 
     # --- contract --------------------------------------------------------------
 

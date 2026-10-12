@@ -138,3 +138,15 @@ class MetricsReport(BaseModel):
     #: How the grouping was defined. Required whenever ``groups`` is non-empty, so a
     #: breakdown can never be reported without saying what it was sliced by.
     group_basis: str = ""
+
+
+class UploadAnalysis(BaseModel):
+    """Analyze-your-data result using the platform's shared metric/prediction contracts."""
+
+    module_id: str
+    filename: str | None = None
+    n_rows: int
+    metrics: MetricsReport
+    predictions: list[Prediction] = Field(default_factory=list)
+    predictions_truncated: bool = False
+    session_id: str | None = None

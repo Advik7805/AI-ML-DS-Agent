@@ -23,7 +23,7 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Callable
 from typing import Any
 
-from core.types import AgentTool, Explanation, MetricsReport, ModuleManifest, Prediction
+from core.types import AgentTool, Explanation, MetricsReport, ModuleManifest, Prediction, UploadAnalysis
 
 
 class Module(ABC):
@@ -101,6 +101,17 @@ class Module(ABC):
 
     def train(self, config: dict[str, Any] | None = None) -> MetricsReport:
         raise NotImplementedError(f"{self.id} does not implement train()")
+
+    def analyze_upload(
+        self,
+        filename: str | None,
+        content: bytes | None,
+        *,
+        session_id: str | None = None,
+        query: str = "",
+    ) -> UploadAnalysis:
+        """Analyze an in-memory upload. Bodies opt in and own their format validation."""
+        raise NotImplementedError(f"{self.id} does not accept uploaded data")
 
     async def stream(self) -> AsyncIterator[dict[str, Any]]:
         """Live event feed (fraud transactions, IoT telemetry). Optional."""

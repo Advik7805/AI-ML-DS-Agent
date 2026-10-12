@@ -6,10 +6,17 @@ generic and keyed on ``{module_id}``, with zero churn-specific code in the gatew
 
 from __future__ import annotations
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
+from threading import Event
+
 import pytest
 from fastapi.testclient import TestClient
 
+import apps.api.main as api_main
 from apps.api.main import app, registry
+from core.agent.providers import MockProvider
 
 
 @pytest.fixture(scope="module")
@@ -44,6 +51,7 @@ def test_health_reports_loaded_modules(client) -> None:
     assert body["status"] == "ok"
     assert "churn" in body["modules_loaded"]
     assert body["load_errors"] == {}
+    assert body["training"]["status"] in {"not_started", "starting", "running", "ready", "partial", "failed"}
 
 
 def test_modules_list_is_contract_shaped(client) -> None:
@@ -126,6 +134,102 @@ def test_agent_dispatch_routes_to_the_owning_body(client) -> None:
 def test_agent_dispatch_unknown_tool_is_404(client) -> None:
     r = client.post("/api/v1/agent/tools/no_such_tool", json={"arguments": {}})
     assert r.status_code == 404
+
+
+def test_agent_chat_stream_reports_real_progress_updates(client) -> None:
+    assert api_main.agent is not None
+    api_main.agent.provider = MockProvider()
+
+    response = client.post("/api/v1/agent/chat/stream", json={"message": "Say hello."})
+
+    assert response.status_code == 200, response.text
+    assert "event: plan" in response.text
+    assert "event: done" in response.text
+    assert '"answer"' in response.text
+
+
+def test_slow_stream_does_not_block_health(client, monkeypatch) -> None:
+    assert api_main.agent is not None
+    entered = Event()
+    release = Event()
+    health_completed = Event()
+
+    def slow_stream(_message, history=None):
+        entered.set()
+        release.wait(timeout=3)
+        yield {"node": "done", "answer": "ready"}
+
+    monkeypatch.setattr(api_main.agent, "stream", slow_stream)
+
+    def get_health():
+        response = client.get("/health")
+        health_completed.set()
+        return response
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        stream_request = pool.submit(client.post, "/api/v1/agent/chat/stream", json={"message": "wait"})
+        try:
+            assert entered.wait(timeout=1), "stream generator did not start"
+            health_request = pool.submit(get_health)
+            assert health_completed.wait(timeout=0.5), "/health was blocked by synchronous agent work"
+            assert health_request.result().status_code == 200
+        finally:
+            release.set()
+        response = stream_request.result(timeout=2)
+
+    assert response.status_code == 200
+    assert "event: done" in response.text
+
+
+def test_health_remains_responsive_during_background_warmup(client, monkeypatch) -> None:
+    """A slow model warm-up runs away from both the event loop and /health."""
+    original_thread = api_main._training_thread
+    if original_thread is not None and original_thread.is_alive():
+        original_thread.join(timeout=10)
+    with api_main._training_lock:
+        original_state = deepcopy(api_main._training_state)
+
+    started = Event()
+    release = Event()
+
+    def blocked_warmup() -> None:
+        with api_main._training_lock:
+            api_main._training_state.update(
+                status="running",
+                trainable=["churn"],
+                bodies={"churn": {"status": "training"}},
+            )
+        started.set()
+        release.wait(timeout=5)
+        with api_main._training_lock:
+            api_main._training_state["bodies"]["churn"] = {"status": "ready"}
+            api_main._training_state["status"] = "ready"
+
+    monkeypatch.setattr(api_main, "_warm_train_bodies", blocked_warmup)
+    with api_main._training_lock:
+        api_main._training_state.clear()
+        api_main._training_state.update(status="not_started", bodies={})
+        api_main._training_thread = None
+
+    async def check_health_while_warming():
+        async with api_main.lifespan(app):
+            assert await asyncio.to_thread(started.wait, 1), "background warm-up did not start"
+            return await asyncio.to_thread(client.get, "/health")
+
+    try:
+        response = asyncio.run(check_health_while_warming())
+    finally:
+        release.set()
+        current_thread = api_main._training_thread
+        if current_thread is not None:
+            current_thread.join(timeout=2)
+        with api_main._training_lock:
+            api_main._training_state.clear()
+            api_main._training_state.update(original_state)
+            api_main._training_thread = original_thread
+
+    assert response.status_code == 200
+    assert response.json()["training"]["status"] == "running"
 
 
 def test_cors_allows_the_frontend_origin(client) -> None:

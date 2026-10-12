@@ -11,12 +11,16 @@ relevance score, so an answer can always be traced back to the text it came from
 from __future__ import annotations
 
 import threading
+from io import BytesIO
+from pathlib import Path
 from typing import Any
 
 from core.contract import Module
-from core.types import AgentTool, Explanation, MetricsReport, ModuleManifest, Prediction
+from core.types import AgentTool, Explanation, MetricsReport, ModuleManifest, Prediction, UploadAnalysis
+from core.upload_utils import MAX_RETURNED_PREDICTIONS
 
 from .retriever import Retriever
+from .session_corpus import SESSION_CORPUS
 
 
 def corpus_status(r: "Retriever") -> dict[str, Any]:
@@ -43,6 +47,7 @@ def corpus_status(r: "Retriever") -> dict[str, Any]:
     return out
 
 ACCENT = "#38bdf8"
+MAX_DOCUMENT_TEXT_BYTES = 2_000_000
 
 #: Words too common to count as evidence of a topical match.
 _STOPWORDS = frozenset("""
@@ -60,6 +65,11 @@ def _matched_term_count(query: str, text: str) -> int:
     hay = text.lower()
     terms = {w for w in query.lower().split() if w.strip("?.!,;:") and w not in _STOPWORDS}
     return sum(1 for t in terms if t in hay)
+
+
+def _source_reference(source: str) -> str:
+    """Keep uploaded filenames intact; built-in documents are source stems ending in .md."""
+    return source if Path(source).suffix else f"{source}.md"
 
 
 def _grounding(query: str, hits: list[Any]) -> tuple[str, str, int]:
@@ -97,7 +107,7 @@ def _grounding(query: str, hits: list[Any]) -> tuple[str, str, int]:
         )
     else:
         label, decision = "Well grounded", (
-            f"Answer from `{hits[0].source}.md` → {hits[0].heading} and cite it."
+            f"Answer from `{_source_reference(hits[0].source)}` → {hits[0].heading} and cite it."
         )
     return label, decision, matched_terms
 
@@ -143,9 +153,14 @@ class RagModule(Module):
         query = str(payload.get("query", "")).strip()
         if not query:
             raise ValueError("Missing required features: query")
+        return self.predict_with_retriever(query, self.retriever, int(payload.get("k", 5)))
 
-        k = int(payload.get("k", 5))
-        hits = self.retriever.search(query, k=k)
+    def predict_with_retriever(self, query: str, retriever: Retriever, k: int = 5) -> Prediction:
+        """Score a query against a base or session-augmented retriever."""
+        query = query.strip()
+        if not query:
+            raise ValueError("Missing required features: query")
+        hits = retriever.search(query, k=k)
         top = hits[0].score if hits else 0.0
 
         # A single shared word is not grounding. "What is the airspeed velocity of an unladen
@@ -161,8 +176,8 @@ class RagModule(Module):
             inputs={"k": float(k)},
             meta={
                 "matched_terms": matched_terms,
-                "n_passages": self.retriever.size,
-                "sources": self.retriever.sources,
+                "n_passages": retriever.size,
+                "sources": retriever.sources,
                 "retriever": "tfidf(1,2)-sublinear",
                 "hits": [
                     {"source": h.source, "heading": h.heading, "score": h.score, "snippet": h.snippet}
@@ -182,7 +197,7 @@ class RagModule(Module):
             space="unspecified",
             attributions=[],
             summary=(
-                f"{len(hits)} passages matched. Strongest: `{hits[0].source}.md` → "
+                f"{len(hits)} passages matched. Strongest: `{_source_reference(hits[0].source)}` → "
                 f"{hits[0].heading}." if hits else "No passages matched the query."
             ),
             caveats=[
@@ -190,6 +205,87 @@ class RagModule(Module):
                 "will not match. A dense backend is a drop-in replacement behind the same interface.",
                 "A high relevance score means lexical overlap, not that the passage answers the question.",
             ],
+        )
+
+    def analyze_upload(
+        self,
+        filename: str | None,
+        content: bytes | None,
+        *,
+        session_id: str | None = None,
+        query: str = "",
+    ) -> UploadAnalysis:
+        stored_filename: str | None = filename
+        active_session = session_id
+        if content is not None:
+            if not filename:
+                raise ValueError("RAG uploads need a filename with a .md, .txt, or .pdf extension.")
+            suffix = Path(filename).suffix.lower()
+            if suffix in {".md", ".txt"}:
+                try:
+                    text = content.decode("utf-8-sig")
+                except UnicodeDecodeError:
+                    raise ValueError("RAG markdown/text uploads must be UTF-8 encoded.") from None
+            elif suffix == ".pdf":
+                try:
+                    from pypdf import PdfReader
+
+                    reader = PdfReader(BytesIO(content), strict=False)
+                    pages: list[str] = []
+                    text_bytes = 0
+                    for page in reader.pages:
+                        page_text = page.extract_text() or ""
+                        text_bytes += len(page_text.encode("utf-8"))
+                        if text_bytes > MAX_DOCUMENT_TEXT_BYTES:
+                            raise ValueError("Extracted document text exceeds the 2 MB per-document limit.")
+                        pages.append(page_text)
+                    text = "\n\n".join(pages)
+                except ValueError:
+                    raise
+                except Exception as exc:  # noqa: BLE001 - malformed PDFs are user input
+                    raise ValueError(f"Could not extract text from PDF: {type(exc).__name__}: {exc}") from None
+            else:
+                raise ValueError("RAG accepts .md, .txt, or .pdf uploads.")
+            if len(text.encode("utf-8")) > MAX_DOCUMENT_TEXT_BYTES:
+                raise ValueError("Extracted document text exceeds the 2 MB per-document limit.")
+            active_session, stored_filename = SESSION_CORPUS.append(active_session, filename, text)
+
+        documents = SESSION_CORPUS.documents(active_session)
+        if not documents:
+            raise ValueError("Upload a .md, .txt, or .pdf file before searching this session.")
+
+        overlay = self.retriever.with_documents(documents)
+        predictions: list[Prediction] = []
+        notes = [
+            f"The session index contains {len(documents)} uploaded document(s) and {overlay.size} passages, including the built-in knowledge base.",
+            "Documents are held in bounded process memory only; they are not persisted and are isolated by session id.",
+        ]
+        scores = {
+            "uploaded_documents": float(len(documents)),
+            "indexed_passages": float(overlay.size),
+        }
+        positive_rate = 0.0
+        if query.strip():
+            prediction = self.predict_with_retriever(query, overlay)
+            predictions.append(prediction)
+            scores["query_match_score"] = float(prediction.score)
+            scores["matched_terms"] = float(prediction.meta.get("matched_terms", 0))
+            positive_rate = float(prediction.label == "Well grounded")
+            notes.append(f"Search status: {prediction.label}. {prediction.decision}")
+            notes.append("For this single query, positive_rate is 1 only when the grounding verdict is well grounded.")
+
+        return UploadAnalysis(
+            module_id=self.id,
+            filename=stored_filename,
+            n_rows=len(documents),
+            metrics=MetricsReport(
+                n_samples=len(documents),
+                positive_rate=positive_rate,
+                scores=scores,
+                notes=notes,
+            ),
+            predictions=predictions[:MAX_RETURNED_PREDICTIONS],
+            session_id=active_session,
         )
 
     def evaluate(self) -> MetricsReport:

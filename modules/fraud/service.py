@@ -12,11 +12,18 @@ import threading
 from typing import Any, AsyncIterator
 
 from core.contract import Module
-from core.types import AgentTool, Explanation, FeatureAttribution, MetricsReport, ModuleManifest, Prediction
+from core.types import AgentTool, Explanation, FeatureAttribution, MetricsReport, ModuleManifest, Prediction, UploadAnalysis
+from core.upload_utils import (
+    classification_upload_result,
+    coerce_binary_column,
+    coerce_numeric_columns,
+    prediction_inputs,
+    read_csv_table,
+)
 
 import pandas as pd
 
-from .data import FEATURES, synthesize
+from .data import FEATURES, TARGET, synthesize
 from .train import FraudModel, train_fraud
 from core.explain import build_explainer
 import numpy as np
@@ -55,16 +62,86 @@ class FraudModule(Module):
         return self._bundle
 
     def train(self, config: dict[str, Any] | None = None) -> MetricsReport:
-        bundle, report = train_fraud(**(config or {}))
-        bundle.save()
-        self._bundle, self._report = bundle, report
+        with self._lock:
+            bundle, report = train_fraud(**(config or {}))
+            bundle.save()
+            self._bundle, self._report = bundle, report
         return report
 
     def evaluate(self) -> MetricsReport:
         if self._report is None:
+            # Let any lifespan warm-up finish before falling back to an evaluation train.
+            _ = self.bundle
+        if self._report is None:
             self.train()
         assert self._report is not None
         return self._report
+
+    def analyze_upload(
+        self,
+        filename: str | None,
+        content: bytes | None,
+        *,
+        session_id: str | None = None,
+        query: str = "",
+    ) -> UploadAnalysis:
+        del session_id, query
+        if not filename or not filename.lower().endswith(".csv") or content is None:
+            raise ValueError("Fraud analysis requires a CSV upload.")
+        frame = read_csv_table(
+            content,
+            filename,
+            module_id=self.id,
+            expected_columns=[*FEATURES, TARGET],
+            optional_columns=[TARGET],
+        )
+        frame = coerce_numeric_columns(frame, FEATURES)
+        if frame[list(FEATURES)].isna().any().any():
+            missing = [column for column in FEATURES if frame[column].isna().any()]
+            raise ValueError(f"Fraud feature columns cannot contain blank values: {', '.join(missing)}.")
+        if TARGET in frame:
+            frame = coerce_binary_column(frame, TARGET)
+            if frame[TARGET].isna().any():
+                raise ValueError(f"Target column '{TARGET}' cannot contain blank values.")
+
+        bundle = self.bundle
+        X = frame[list(FEATURES)]
+        supervised = bundle.supervised.predict_proba(X)[:, 1]
+        unsupervised = bundle.unsupervised_proba(X)
+        probabilities = np.maximum(supervised, unsupervised)
+        predictions: list[Prediction] = []
+        for index, (_, row) in enumerate(frame.iterrows()):
+            score = float(probabilities[index])
+            label, decision = _verdict(score, bundle.threshold)
+            predictions.append(
+                Prediction(
+                    module_id=self.id,
+                    score=round(score, 4),
+                    label=label,
+                    decision=decision,
+                    inputs=prediction_inputs(row, FEATURES),
+                    meta={
+                        "row_index": index,
+                        "threshold": bundle.threshold,
+                        "supervised_score": round(float(supervised[index]), 4),
+                        "unsupervised_score": round(float(unsupervised[index]), 4),
+                        "decisive_model": "supervised model" if supervised[index] >= unsupervised[index] else "isolation forest",
+                        "base_rate": round(bundle.base_rate, 5),
+                        "uploaded_data": True,
+                    },
+                )
+            )
+        labels = frame[TARGET].astype(int).tolist() if TARGET in frame else None
+        return classification_upload_result(
+            module_id=self.id,
+            filename=filename,
+            n_rows=len(frame),
+            predictions=predictions,
+            threshold=bundle.threshold,
+            target_name=TARGET,
+            labels=labels,
+            model_source="supervised and anomaly-detection ensemble",
+        )
 
     # --- contract ------------------------------------------------------------
 

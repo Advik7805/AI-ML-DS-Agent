@@ -12,25 +12,85 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 import json
+import threading
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
 from core.agent.graph import HubAgent
 from core.agent.providers import Message, get_provider
 from core.contract import ModuleRegistry
 from core.integrations.ratelimit import get_limiter
-from core.types import Explanation, MetricsReport, ModuleManifest, Prediction
+from core.types import Explanation, MetricsReport, ModuleManifest, Prediction, UploadAnalysis
+
+
+_training_lock = threading.Lock()
+_training_state: dict[str, Any] = {"status": "not_started", "bodies": {}}
+_training_thread: threading.Thread | None = None
+
+
+def _warm_train_bodies() -> None:
+    """Train every declared body off the request loop and publish per-body progress."""
+    try:
+        from flows.train_all import TRAINABLE, train_one
+    except Exception as exc:  # noqa: BLE001 - warm-up failure must not affect API health
+        with _training_lock:
+            _training_state["status"] = "failed"
+            _training_state["error"] = f"{type(exc).__name__}: {exc}"
+        return
+
+    with _training_lock:
+        _training_state["status"] = "running"
+        _training_state["trainable"] = list(TRAINABLE)
+        _training_state["bodies"] = {body: {"status": "queued"} for body in TRAINABLE}
+
+    for body in TRAINABLE:
+        with _training_lock:
+            _training_state["bodies"][body] = {"status": "training"}
+        try:
+            result = train_one(body)
+        except Exception as exc:  # noqa: BLE001 - keep later bodies warming after a bad module
+            result = {"body": body, "ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        with _training_lock:
+            _training_state["bodies"][body] = {
+                "status": "ready" if result.get("ok") else "failed",
+                **{key: value for key, value in result.items() if key not in {"body", "ok"}},
+                "error": result.get("error"),
+            }
+
+    with _training_lock:
+        failed = [body for body, status in _training_state["bodies"].items() if status["status"] != "ready"]
+        _training_state["status"] = "partial" if failed else "ready"
+        _training_state["failed"] = failed
+
+
+def _training_snapshot() -> dict[str, Any]:
+    with _training_lock:
+        return {
+            **_training_state,
+            "bodies": {body: dict(status) for body, status in _training_state.get("bodies", {}).items()},
+        }
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    """Discover every body under ``modules/`` once, at startup, then build the hub agent."""
-    global agent
+    """Discover bodies and serve immediately while model artifacts warm in a daemon thread."""
+    global agent, _training_thread
     registry.discover("modules")
     agent = HubAgent(registry, get_provider())
+    with _training_lock:
+        if _training_state["status"] == "not_started":
+            _training_state["status"] = "starting"
+            _training_thread = threading.Thread(
+                target=_warm_train_bodies,
+                name="saros-model-warmup",
+                daemon=True,
+            )
+            _training_thread.start()
     yield
 
 
@@ -56,6 +116,10 @@ app.add_middleware(
 
 #: Populated by the lifespan hook. Kept module-level so tests can swap it out.
 registry = ModuleRegistry()
+
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+MAX_ANALYZE_QUERY_CHARS = 2_000
+MAX_ANALYZE_SESSION_ID_CHARS = 128
 
 
 #: Paths never metered. `/health` is hit by the keep-alive cron every 10 minutes and must not
@@ -135,6 +199,7 @@ def health() -> dict[str, Any]:
         "status": "ok",
         "modules_loaded": registry.ids(),
         "load_errors": getattr(registry, "load_errors", {}),
+        "training": _training_snapshot(),
     }
 
 
@@ -203,6 +268,63 @@ def train(module_id: str, body: ToolCallRequest | None = None) -> MetricsReport:
         raise HTTPException(status_code=404, detail=str(exc)) from None
     try:
         return module.train((body.arguments if body else None) or {})
+    except NotImplementedError as exc:
+        raise HTTPException(status_code=501, detail=str(exc)) from None
+
+
+@app.post("/api/v1/modules/{module_id}/analyze", response_model=UploadAnalysis)
+async def analyze_upload(
+    module_id: str,
+    file: UploadFile | None = File(default=None),
+    session_id: str | None = Form(default=None),
+    query: str = Form(default=""),
+) -> UploadAnalysis:
+    """Analyze a bounded upload without persisting it; RAG may reuse a session id."""
+    try:
+        module = registry.get(module_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from None
+    if len(query) > MAX_ANALYZE_QUERY_CHARS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"query cannot exceed {MAX_ANALYZE_QUERY_CHARS:,} characters.",
+        )
+    if session_id is not None and len(session_id) > MAX_ANALYZE_SESSION_ID_CHARS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"session_id cannot exceed {MAX_ANALYZE_SESSION_ID_CHARS} characters.",
+        )
+
+    filename: str | None = None
+    content: bytes | None = None
+    if file is not None:
+        filename = file.filename
+        if file.size is not None and file.size > MAX_UPLOAD_BYTES:
+            await file.close()
+            raise HTTPException(
+                status_code=413,
+                detail=f"Upload exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)} MB file limit.",
+            )
+        content = await file.read(MAX_UPLOAD_BYTES + 1)
+        await file.close()
+        if len(content) > MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Upload exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)} MB file limit.",
+            )
+        if not content:
+            raise HTTPException(status_code=422, detail="The uploaded file is empty.")
+
+    try:
+        return await run_in_threadpool(
+            module.analyze_upload,
+            filename,
+            content,
+            session_id=session_id,
+            query=query,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
     except NotImplementedError as exc:
         raise HTTPException(status_code=501, detail=str(exc)) from None
 
@@ -335,14 +457,23 @@ def chat(body: ChatRequest) -> ChatResponse:
 
 @app.post("/api/v1/agent/chat/stream")
 async def chat_stream(body: ChatRequest):
-    """Server-sent events: one event per node so the UI can show the agent working."""
+    """Server-sent events: keep synchronous agent/model work off the ASGI event loop."""
     from sse_starlette.sse import EventSourceResponse
 
     if agent is None:
         raise HTTPException(status_code=503, detail="Agent not initialised.")
+    if not body.message.strip():
+        raise HTTPException(status_code=422, detail="message must not be empty.")
 
     async def events():
-        for update in agent.stream(body.message, history=_coerce_history(body.history)):
+        stream = iter(agent.stream(body.message, history=_coerce_history(body.history)))
+        finished = object()
+        while True:
+            # LangGraph and model/tool implementations are synchronous. Advance them in a worker
+            # so a slow LLM or tool never prevents /health and other requests from being served.
+            update = await run_in_threadpool(next, stream, finished)
+            if update is finished:
+                break
             yield {"event": update.get("node", "update"), "data": json.dumps(update, default=str)}
 
     return EventSourceResponse(events())
