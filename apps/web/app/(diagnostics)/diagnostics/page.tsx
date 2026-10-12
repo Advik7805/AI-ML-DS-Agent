@@ -7,7 +7,7 @@ export default function Page() {
   return (
     <>
       <div className="mx-auto max-w-6xl px-5 pb-8">
-        <p className="max-w-2xl text-[15px] leading-relaxed text-[#57534e]">Diabetes risk scoring with per-patient SHAP explanations and a Fairlearn group audit. Optimises against false-negative rate, because in screening a missed diagnosis is the harm that matters.</p>
+        <p className="max-w-2xl text-[15px] leading-relaxed text-ink-dim">Diabetes risk scoring with per-patient SHAP explanations and a Fairlearn group audit. Optimises against false-negative rate, because in screening a missed diagnosis is the harm that matters.</p>
       </div>
 
       <section id="board" className="mx-auto max-w-6xl scroll-mt-24 px-5 pb-10">
