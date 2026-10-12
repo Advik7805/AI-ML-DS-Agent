@@ -51,6 +51,9 @@ export function AgentChat() {
   const [provider, setProvider] = useState<string>("");
   const [live, setLive] = useState<boolean | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  // Counted from the API rather than written into the copy — see the note in the empty state.
+  const [toolCount, setToolCount] = useState(0);
+  const [bodyCount, setBodyCount] = useState(0);
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -65,8 +68,15 @@ export function AgentChat() {
         setProvider(info.provider);
         setLive(info.live);
         setNote(info.note);
+        setToolCount(info.tools?.length ?? 0);
       })
       .catch(() => setNote("Agent endpoint unreachable."));
+  }, []);
+
+  useEffect(() => {
+    clientFetch<unknown[]>("/api/v1/modules")
+      .then((mods) => setBodyCount(Array.isArray(mods) ? mods.length : 0))
+      .catch(() => setBodyCount(0));
   }, []);
 
   useEffect(() => {
@@ -188,8 +198,11 @@ export function AgentChat() {
               Ask the agent to reach into any body. It plans, calls the tools, and shows its work.
             </p>
             <p className="mt-1.5 text-[11.5px] text-ink-faint">
-              23 tools across 7 bodies · upload a file under <em>Your data</em> and the agent can
-              answer about it in this conversation.
+              {/* Counted from the live registry, never typed: the number moved from 22 to 23 and
+                  back in this project's own history, and a wrong count is a small lie. */}
+              {toolCount > 0 ? `${toolCount} tools` : "Every tool"} across {bodyCount || "every"}{" "}
+              bod{bodyCount === 1 ? "y" : "ies"} · upload a file under <em>Your data</em> and the
+              agent can answer about it in this conversation.
             </p>
           </div>
         )}
