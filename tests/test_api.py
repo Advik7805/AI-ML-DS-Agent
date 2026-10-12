@@ -154,7 +154,7 @@ def test_slow_stream_does_not_block_health(client, monkeypatch) -> None:
     release = Event()
     health_completed = Event()
 
-    def slow_stream(_message, history=None):
+    def slow_stream(_message, history=None, session_id=None):
         entered.set()
         release.wait(timeout=3)
         yield {"node": "done", "answer": "ready"}

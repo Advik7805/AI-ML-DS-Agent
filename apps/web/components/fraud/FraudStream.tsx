@@ -31,6 +31,7 @@ interface StreamSummary {
   missed_fraud: number;
   threshold: number;
   enriched: boolean;
+  data_source: string;
   enrichment_note: string;
   top_flagged: Flagged[];
 }
@@ -132,9 +133,10 @@ export function FraudStream() {
           ))}
         </div>
 
-        <p className="mt-4 border-t border-line pt-3 text-[11.5px] leading-relaxed text-ink-faint">
-          {data.enrichment_note}
-        </p>
+        <div className="mt-4 border-t border-line pt-3 text-[11.5px] leading-relaxed text-ink-faint">
+          <p><span className="font-mono text-[9px] uppercase tracking-wider">Data source · </span>{data.data_source}</p>
+          <p className="mt-1">{data.enrichment_note}</p>
+        </div>
       </div>
 
       <div className="space-y-3">

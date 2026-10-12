@@ -8,7 +8,9 @@ from io import StringIO
 import pytest
 from fastapi.testclient import TestClient
 
+import apps.api.main as api_main
 from apps.api.main import MAX_UPLOAD_BYTES, app, registry
+from core.agent.providers import MockProvider
 from modules.churn.data import FEATURES as CHURN_FEATURES, TARGET as CHURN_TARGET
 from modules.fraud.data import FEATURES as FRAUD_FEATURES, TARGET as FRAUD_TARGET
 from modules.maintenance.data import FEATURES as MAINTENANCE_FEATURES, synthesize as synthesize_maintenance
@@ -137,6 +139,7 @@ def test_fraud_csv_upload_uses_existing_ensemble(upload_client: TestClient) -> N
         "fraud",
         "transactions.csv",
         _csv_bytes([*FRAUD_FEATURES, FRAUD_TARGET], rows),
+        source_label="Contoso internal ledger",
     )
 
     assert response.status_code == 200, response.text
@@ -144,10 +147,28 @@ def test_fraud_csv_upload_uses_existing_ensemble(upload_client: TestClient) -> N
     assert len(result["predictions"]) == 2
     assert result["metrics"]["n_samples"] == 2
     assert "accuracy" in result["metrics"]["scores"]
+    assert result["source_label"] == "Contoso internal ledger"
+    assert result["session_id"]
+    assert any(name.endswith(".analysis.md") for name in result["session_sources"])
+    assert "not transactions from a real company" in result["metrics"]["notes"][0]
+    assert result["predictions"][0]["meta"]["training_data_source"].startswith("synthetic")
     assert result["predictions"][0]["meta"]["decisive_model"] in {
         "supervised model",
         "isolation forest",
     }
+
+    retrieved = upload_client.post(
+        "/api/v1/agent/tools/search_knowledge",
+        json={
+            "arguments": {
+                "query": "company source Contoso internal ledger",
+                "session_id": result["session_id"],
+            }
+        },
+    )
+    assert retrieved.status_code == 200, retrieved.text
+    assert any(hit["source"].endswith(".analysis.md") for hit in retrieved.json()["result"]["results"])
+    assert "Contoso internal ledger" in retrieved.json()["result"]["results"][0]["snippet"]
 
 
 def test_pricing_csv_upload_fits_sku_elasticity(upload_client: TestClient) -> None:
@@ -229,6 +250,57 @@ def test_rag_text_upload_is_session_scoped_and_reusable(upload_client: TestClien
         hit["source"] != "returns.txt"
         for hit in isolated.json()["predictions"][0]["meta"]["hits"]
     )
+
+
+def test_rag_search_tool_and_hub_agent_retrieve_session_upload(upload_client: TestClient) -> None:
+    session_id = "agent-rag-upload-session"
+    uploaded = _multipart(
+        upload_client,
+        "rag",
+        "returns.txt",
+        b"# Custom return policy\n\nUnopened equipment may be returned within 47 days with a receipt.",
+        session_id=session_id,
+        source_label="Fabrikam returns portal",
+    )
+    assert uploaded.status_code == 200, uploaded.text
+
+    direct = upload_client.post(
+        "/api/v1/agent/tools/search_knowledge",
+        json={"arguments": {"query": "unopened equipment returned 47 days", "session_id": session_id}},
+    )
+    assert direct.status_code == 200, direct.text
+    assert any(hit["source"] == "returns.txt" for hit in direct.json()["result"]["results"])
+    assert "returns.txt" in direct.json()["result"]["citation"]
+
+    source_search = upload_client.post(
+        "/api/v1/agent/tools/search_knowledge",
+        json={
+            "arguments": {
+                "query": "uploader company data source Fabrikam returns portal",
+                "session_id": session_id,
+            }
+        },
+    )
+    assert source_search.status_code == 200, source_search.text
+    assert any("Fabrikam returns portal" in hit["snippet"] for hit in source_search.json()["result"]["results"])
+
+    assert api_main.agent is not None
+    previous_provider = api_main.agent.provider
+    api_main.agent.provider = MockProvider()
+    try:
+        streamed = upload_client.post(
+            "/api/v1/agent/chat/stream",
+            json={
+                "message": "Search the uploaded returns.txt document: unopened equipment within 47 days.",
+                "session_id": session_id,
+            },
+        )
+    finally:
+        api_main.agent.provider = previous_provider
+
+    assert streamed.status_code == 200, streamed.text
+    assert "returns.txt" in streamed.text
+    assert "Custom return policy" in streamed.text
 
 
 def test_rag_analyze_bounds_query_and_session_metadata(upload_client: TestClient) -> None:

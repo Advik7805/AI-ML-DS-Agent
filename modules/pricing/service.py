@@ -194,6 +194,10 @@ class PricingModule(Module):
                 + ", ".join(under_sampled[:20])
                 + ("…" if len(under_sampled) > 20 else ".")
             )
+        predictions.sort(
+            key=lambda item: float(item.meta.get("estimated_revenue_uplift", 0.0)),
+            reverse=True,
+        )
         return UploadAnalysis(
             module_id=self.id,
             filename=filename,

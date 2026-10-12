@@ -142,6 +142,15 @@ export function BodyExplorer({ moduleId, accent }: Props) {
 
   const props = (tool?.parameters_schema?.properties ?? {}) as Json;
   const required = new Set((tool?.parameters_schema?.required ?? []) as string[]);
+  const inputTool = useMemo(() => {
+    const tools = manifest?.tools ?? [];
+    return [...tools].sort(
+      (left, right) =>
+        Object.keys(right.parameters_schema?.properties ?? {}).length -
+        Object.keys(left.parameters_schema?.properties ?? {}).length,
+    )[0] ?? null;
+  }, [manifest]);
+  const declaredInputs = Object.keys(inputTool?.parameters_schema?.properties ?? {});
 
   return (
     <div className="mx-auto max-w-6xl px-5 pb-16">
@@ -171,6 +180,43 @@ export function BodyExplorer({ moduleId, accent }: Props) {
                 {c}
               </span>
             ))}
+          </div>
+
+          <div className="mt-5 grid gap-3 md:grid-cols-2">
+            <div className="rounded-2xl border border-line bg-void-2 p-4 shadow-sm">
+              <h3 className="text-[12px] font-semibold">Data & evaluation basis</h3>
+              <p className="mt-2 text-[11.5px] leading-relaxed text-ink-dim">
+                {metrics?.notes[0] ?? "Evaluation and data provenance load from this body's model card."}
+              </p>
+              {moduleId === "fraud" && (
+                <p className="mt-2 rounded-lg border border-line bg-void-3 px-2.5 py-2 text-[10.5px] leading-relaxed text-ink-faint">
+                  Built-in fraud training and live-feed examples are synthetic demonstrations—not real company transactions.
+                </p>
+              )}
+              {metrics && (
+                <p className="mt-2 font-mono text-[10px] text-ink-faint">
+                  Evaluation rows: {metrics.n_samples.toLocaleString()} · operating threshold: {metrics.threshold.toFixed(3)}
+                </p>
+              )}
+              <a href="/#analyze" className="mt-3 inline-flex text-[10.5px] font-medium text-ink-dim underline underline-offset-2 hover:text-ink">
+                Analyze an upload with this hub →
+              </a>
+            </div>
+            <div className="rounded-2xl border border-line bg-void-2 p-4 shadow-sm">
+              <h3 className="text-[12px] font-semibold">Primary tool inputs</h3>
+              <p className="mt-2 text-[11.5px] leading-relaxed text-ink-dim">
+                {inputTool?.description ?? "This body exposes its capabilities through the tool manifest."}
+              </p>
+              {declaredInputs.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {declaredInputs.map((name) => (
+                    <span key={name} className="rounded-full border border-line bg-void-3 px-2 py-1 font-mono text-[9px] text-ink-faint">
+                      {name}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           {metrics && (

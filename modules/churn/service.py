@@ -130,8 +130,37 @@ class ChurnModule(Module):
                     },
                 )
             )
+        explained = 0
+        for prediction in sorted(predictions, key=lambda item: item.score, reverse=True)[:3]:
+            try:
+                values, base_value = bundle.shap_values(prediction.inputs)
+                attributions = [
+                    FeatureAttribution.of(name, prediction.inputs.get(name, 0.0), float(value))
+                    for name, value in zip(bundle.feature_names, values)
+                ]
+                attributions.sort(key=lambda item: abs(item.attribution), reverse=True)
+                prediction.factors = attributions[:5]
+                top = attributions[0] if attributions else None
+                prediction.explanation = Explanation(
+                    kind="shap",
+                    space="log_odds",
+                    attributions=attributions,
+                    base_value=round(float(base_value), 6),
+                    summary=(
+                        f"{top.feature} is the largest local driver in the raw model margin."
+                        if top else "No local attributions were available."
+                    ),
+                    caveats=[
+                        "SHAP explains the uncalibrated model margin; the displayed score is the calibrated probability.",
+                        "Local factors are computed only for the three highest-scored returned rows.",
+                    ],
+                )
+                explained += 1
+            except Exception:  # noqa: BLE001 - XAI must not prevent the uploaded rows being scored
+                continue
+
         labels = frame[TARGET].astype(int).tolist() if TARGET in frame else None
-        return classification_upload_result(
+        analysis = classification_upload_result(
             module_id=self.id,
             filename=filename,
             n_rows=len(frame),
@@ -141,6 +170,11 @@ class ChurnModule(Module):
             labels=labels,
             model_source=bundle.source,
         )
+        analysis.metrics.notes.append(
+            f"Local SHAP factors were computed for {explained} of the three highest-scored returned rows; "
+            "they explain the raw estimator margin, not the calibrated probability."
+        )
+        return analysis
 
     # --- contract --------------------------------------------------------------
 

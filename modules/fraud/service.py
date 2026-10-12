@@ -127,12 +127,41 @@ class FraudModule(Module):
                         "unsupervised_score": round(float(unsupervised[index]), 4),
                         "decisive_model": "supervised model" if supervised[index] >= unsupervised[index] else "isolation forest",
                         "base_rate": round(bundle.base_rate, 5),
+                        "training_rows": bundle.n_train,
+                        "training_data_source": "synthetic deterministic simulation; not real company transactions",
+                        "model_basis": "max(supervised gradient-boosted score, calibrated isolation-forest anomaly score)",
+                        "model_features": list(FEATURES),
                         "uploaded_data": True,
                     },
                 )
             )
+        explained = 0
+        for prediction in sorted(predictions, key=lambda item: item.score, reverse=True)[:3]:
+            if prediction.meta.get("decisive_model") == "supervised model":
+                try:
+                    explanation = self.explain(prediction.inputs)
+                    prediction.explanation = explanation
+                    prediction.factors = explanation.attributions[:5]
+                    explained += int(bool(explanation.attributions))
+                except Exception:  # noqa: BLE001 - preserve scores if optional XAI fails
+                    prediction.explanation = Explanation(
+                        kind="none",
+                        summary="The supervised score was decisive, but local feature attributions were unavailable.",
+                    )
+            else:
+                prediction.explanation = Explanation(
+                    kind="none",
+                    summary=(
+                        "The calibrated isolation-forest anomaly score was higher than the supervised score. "
+                        "This pipeline does not provide feature-level attributions for the forest."
+                    ),
+                    caveats=[
+                        "Both component scores and the decisive model are included in the prediction metadata.",
+                    ],
+                )
+
         labels = frame[TARGET].astype(int).tolist() if TARGET in frame else None
-        return classification_upload_result(
+        analysis = classification_upload_result(
             module_id=self.id,
             filename=filename,
             n_rows=len(frame),
@@ -142,6 +171,18 @@ class FraudModule(Module):
             labels=labels,
             model_source="supervised and anomaly-detection ensemble",
         )
+        analysis.metrics.notes.insert(
+            0,
+            "Training provenance: the built-in fraud model uses a deterministic synthetic "
+            "demonstration transaction stream, not transactions from a real company. "
+            "The uploaded CSV was scored with that existing model and was not used to train it.",
+        )
+        analysis.metrics.notes.append(
+            f"For the three highest-scored returned rows, supervised-model SHAP was available for "
+            f"{explained} row(s); isolation-forest decisions are accompanied by component scores "
+            "but do not have feature-level attribution in this pipeline."
+        )
+        return analysis
 
     # --- contract ------------------------------------------------------------
 
@@ -151,9 +192,10 @@ class FraudModule(Module):
             id=self.id,
             title="Fraud & Anomaly",
             summary=(
-                "Streaming transaction scoring. A supervised gradient-boosted model for known "
-                "patterns plus an isolation forest for novel ones, combined by max so unseen "
-                "fraud still trips the alarm. Live feed included."
+                "Transaction scoring with a supervised gradient-boosted model plus an isolation "
+                "forest; the higher risk score wins. The built-in training and live-feed examples "
+                "are synthetic demonstrations, not data from a real company. Upload a CSV to score "
+                "your own transactions; uploads do not retrain the model."
             ),
             accent=ACCENT,
             status="live",
@@ -182,6 +224,10 @@ class FraudModule(Module):
                 "unsupervised_score": round(float(unsup), 4),
                 "decisive_model": which,
                 "base_rate": round(bundle.base_rate, 5),
+                "training_rows": bundle.n_train,
+                "training_data_source": "synthetic deterministic simulation; not real company transactions",
+                "model_basis": "max(supervised gradient-boosted score, calibrated isolation-forest anomaly score)",
+                "model_features": list(FEATURES),
             },
         )
 
@@ -355,9 +401,10 @@ class FraudModule(Module):
             "missed_fraud": missed,
             "threshold": bundle.threshold,
             "enriched": True,
+            "data_source": "synthetic fraud-enriched demonstration stream; not real company transactions",
             "enrichment_note": (
-                "Sample is fraud-enriched so the summary is informative; real traffic is ~1% "
-                "fraudulent."
+                "Synthetic demonstration sample is fraud-enriched so the summary is informative; "
+                "it is not a live company feed, and real traffic is ~1% fraudulent."
             ),
             "top_flagged": sorted(flagged, key=lambda r: -r["risk"])[:5],
         }

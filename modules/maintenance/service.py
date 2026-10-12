@@ -315,10 +315,25 @@ class MaintenanceModule(Module):
                         "rul_cycles": round(rul, 1),
                         "rul_cap": RUL_CAP,
                         "source": bundle.source,
+                        "model_basis": "HistGradientBoostingRegressor on the latest row per engine; urgency = 1 - predicted RUL / cap",
+                        "model_features": list(bundle.feature_names),
                         "uploaded_data": True,
                     },
                 )
             )
+
+        explained = 0
+        for prediction in sorted(predictions, key=lambda item: item.score, reverse=True)[:3]:
+            try:
+                explanation = self.explain(prediction.inputs)
+                prediction.explanation = explanation
+                prediction.factors = explanation.attributions[:5]
+                explained += int(bool(explanation.attributions))
+            except Exception:  # noqa: BLE001 - keep scored engines if XAI is unavailable
+                prediction.explanation = Explanation(
+                    kind="none",
+                    summary="The remaining-life score is available; local sensor attributions could not be computed.",
+                )
 
         predicted = np.asarray(rul_values, dtype=float)
         scores = {
@@ -329,6 +344,7 @@ class MaintenanceModule(Module):
         notes = [
             f"Scored the latest telemetry row for each of {len(latest):,} engine(s) using the existing model.",
             "No upload is saved and no model is retrained. Provide an optional 'rul' column for error metrics.",
+            f"Local sensor attributions were computed for {explained} of the three highest-urgency returned engines.",
         ]
         if "rul" in latest:
             actual = latest["rul"].to_numpy(dtype=float)
@@ -341,6 +357,7 @@ class MaintenanceModule(Module):
             positive_rate = float(np.mean(predicted <= 30))
             notes.append("Without an 'rul' label, positive_rate is the share predicted within 30 cycles of failure.")
 
+        predictions.sort(key=lambda item: item.score, reverse=True)
         return UploadAnalysis(
             module_id=self.id,
             filename=filename,

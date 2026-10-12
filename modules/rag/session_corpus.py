@@ -30,7 +30,7 @@ class SessionCorpus:
         sid = (session_id or "").strip() or secrets.token_urlsafe(24)
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", sid):
             raise ValueError("session_id must contain 1–128 letters, numbers, hyphens, or underscores.")
-        clean_name = Path(filename.replace("\\", "/")).name.strip()
+        clean_name = " ".join(Path(filename.replace("\\", "/")).name.split())[:200]
         if not clean_name or clean_name in {".", ".."}:
             clean_name = "uploaded-document.txt"
         if not text.strip():

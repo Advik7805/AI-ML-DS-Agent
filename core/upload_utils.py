@@ -155,6 +155,6 @@ def classification_upload_result(
             threshold=float(threshold),
             notes=notes,
         ),
-        predictions=predictions[:MAX_RETURNED_PREDICTIONS],
+        predictions=sorted(predictions, key=lambda item: item.score, reverse=True)[:MAX_RETURNED_PREDICTIONS],
         predictions_truncated=len(predictions) > MAX_RETURNED_PREDICTIONS,
     )

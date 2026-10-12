@@ -24,6 +24,7 @@ interface TraceEntry {
   tool_calls?: string[];
   arguments?: Record<string, unknown>;
   note?: string;
+  session_context?: string | null;
 }
 
 interface Turn {
@@ -48,6 +49,8 @@ export function AgentChat() {
   const [busy, setBusy] = useState(false);
   const [provider, setProvider] = useState<string>("connecting");
   const [note, setNote] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState("");
+  const [sessionSources, setSessionSources] = useState<string[]>([]);
   const [agentError, setAgentError] = useState<string | null>(null);
   const [agentBusy, setAgentBusy] = useState(true);
   const [progress, setProgress] = useState<TraceEntry[]>([]);
@@ -73,6 +76,29 @@ export function AgentChat() {
   useEffect(() => {
     void loadAgent();
   }, [loadAgent]);
+
+  useEffect(() => {
+    function refreshSession(event?: Event) {
+      const detail = event instanceof CustomEvent
+        ? event.detail as { sessionId?: unknown; sources?: unknown }
+        : undefined;
+      try {
+        const storedId = window.localStorage.getItem("saros-rag-session") ?? "";
+        setSessionId(typeof detail?.sessionId === "string" ? detail.sessionId : storedId);
+        const saved = JSON.parse(window.localStorage.getItem("saros-session-sources") ?? "[]") as unknown;
+        const sources = Array.isArray(detail?.sources) ? detail.sources : saved;
+        setSessionSources(Array.isArray(sources) ? sources.filter((item): item is string => typeof item === "string") : []);
+      } catch {
+        setSessionId(typeof detail?.sessionId === "string" ? detail.sessionId : "");
+        setSessionSources(Array.isArray(detail?.sources)
+          ? detail.sources.filter((item): item is string => typeof item === "string")
+          : []);
+      }
+    }
+    refreshSession();
+    window.addEventListener("saros:session-updated", refreshSession);
+    return () => window.removeEventListener("saros:session-updated", refreshSession);
+  }, []);
 
   useEffect(() => {
     function prefill(event: Event) {
@@ -108,7 +134,7 @@ export function AgentChat() {
       const response = await fetch("/api/v1/agent/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message, history }),
+        body: JSON.stringify({ message, history, ...(sessionId ? { session_id: sessionId } : {}) }),
       });
       if (!response.ok) {
         let detail = `${response.status} ${response.statusText}`;
@@ -211,6 +237,11 @@ export function AgentChat() {
       {agentBusy && <p role="status" className="mt-2 text-[11px] text-ink-faint">Waking the API and loading agent status…</p>}
       {note && <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">{note}</p>}
       {agentError && <div className="mt-3"><WakeRetry error={`Agent status unavailable: ${agentError}`} onRetry={() => void loadAgent()} busy={agentBusy} label="Retry status" /></div>}
+      <p className="mt-3 rounded-lg border border-line bg-void-3/70 px-3 py-2 text-[10.5px] leading-relaxed text-ink-faint">
+        {sessionSources.length > 0
+          ? `Active upload context: ${sessionSources.slice(0, 4).join(", ")}${sessionSources.length > 4 ? ` +${sessionSources.length - 4} more` : ""}. The agent can search these temporary session sources and cite matching files.`
+          : "No uploads are indexed in this browser session yet. Upload a supported CSV, TXT, Markdown or PDF from Analyze your data to make its analysis or text available to the agent."}
+      </p>
 
       <div className="mt-4 max-h-[420px] min-h-[120px] space-y-3 overflow-y-auto pr-1">
         {turns.length === 0 && (
@@ -253,6 +284,7 @@ export function AgentChat() {
                             {JSON.stringify(e.arguments).slice(0, 120)}
                           </div>
                         )}
+                        {e.session_context && <div className="mt-0.5 text-ink-faint">RAG scope: {e.session_context}</div>}
                         {e.note && <div className="mt-0.5 text-churn">{e.note}</div>}
                       </li>
                     ))}

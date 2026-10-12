@@ -145,8 +145,13 @@ class UploadAnalysis(BaseModel):
 
     module_id: str
     filename: str | None = None
+    #: Optional attribution supplied by the uploader; never inferred from demo/model data.
+    source_label: str | None = None
     n_rows: int
     metrics: MetricsReport
     predictions: list[Prediction] = Field(default_factory=list)
     predictions_truncated: bool = False
+    #: Opaque, browser-scoped id for the in-memory RAG/session report index.
     session_id: str | None = None
+    #: Files and generated analysis reports indexed for the current session.
+    session_sources: list[str] = Field(default_factory=list)

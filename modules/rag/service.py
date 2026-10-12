@@ -137,9 +137,9 @@ class RagModule(Module):
             id=self.id,
             title="Knowledge RAG",
             summary=(
-                "Retrieval-augmented answers over an enterprise policy corpus. Heading-aware "
-                "chunking, TF-IDF ranking, and mandatory citations so nothing is asserted "
-                "without a source."
+                "Search the shipped sample policy corpus and temporary user-uploaded documents. "
+                "Heading-aware chunking, lexical TF-IDF ranking, and exact file/heading citations "
+                "keep answers tied to retrieved sources; upload your own policies for organization-specific answers."
             ),
             accent=ACCENT,
             status="live",
@@ -148,12 +148,22 @@ class RagModule(Module):
             tools=self.tools(),
         )
 
+    def _retriever_for_session(self, session_id: str | None) -> Retriever:
+        """Build an isolated overlay only when this browser session has uploaded documents."""
+        documents = SESSION_CORPUS.documents(session_id)
+        return self.retriever.with_documents(documents) if documents else self.retriever
+
     def predict(self, payload: dict[str, Any]) -> Prediction:
         """For RAG, `score` is retrieval confidence rather than a risk probability."""
         query = str(payload.get("query", "")).strip()
         if not query:
             raise ValueError("Missing required features: query")
-        return self.predict_with_retriever(query, self.retriever, int(payload.get("k", 5)))
+        session_id = str(payload.get("session_id", "")).strip() or None
+        return self.predict_with_retriever(
+            query,
+            self._retriever_for_session(session_id),
+            int(payload.get("k", 5)),
+        )
 
     def predict_with_retriever(self, query: str, retriever: Retriever, k: int = 5) -> Prediction:
         """Score a query against a base or session-augmented retriever."""
@@ -183,6 +193,7 @@ class RagModule(Module):
                     {"source": h.source, "heading": h.heading, "score": h.score, "snippet": h.snippet}
                     for h in hits
                 ],
+                "citation": retriever.cite(hits),
             },
         )
 
@@ -214,6 +225,7 @@ class RagModule(Module):
         *,
         session_id: str | None = None,
         query: str = "",
+        source_label: str | None = None,
     ) -> UploadAnalysis:
         stored_filename: str | None = filename
         active_session = session_id
@@ -248,17 +260,24 @@ class RagModule(Module):
                 raise ValueError("RAG accepts .md, .txt, or .pdf uploads.")
             if len(text.encode("utf-8")) > MAX_DOCUMENT_TEXT_BYTES:
                 raise ValueError("Extracted document text exceeds the 2 MB per-document limit.")
+            label = " ".join((source_label or "").split())[:160]
+            provenance = (
+                f"Uploader-provided company/data source label (not independently verified): {label}."
+                if label
+                else "Company/data source was not provided by the uploader; do not infer an organization from this document."
+            )
+            text = f"# Upload metadata\n\n{provenance}\n\n# Document content\n\n{text}"
             active_session, stored_filename = SESSION_CORPUS.append(active_session, filename, text)
 
         documents = SESSION_CORPUS.documents(active_session)
-        if not documents:
+        if not documents and not query.strip():
             raise ValueError("Upload a .md, .txt, or .pdf file before searching this session.")
 
-        overlay = self.retriever.with_documents(documents)
+        overlay = self.retriever.with_documents(documents) if documents else self.retriever
         predictions: list[Prediction] = []
         notes = [
             f"The session index contains {len(documents)} uploaded document(s) and {overlay.size} passages, including the built-in knowledge base.",
-            "Documents are held in bounded process memory only; they are not persisted and are isolated by session id.",
+            "Uploaded documents are held in bounded process memory only; they are not persisted and are isolated by session id.",
         ]
         scores = {
             "uploaded_documents": float(len(documents)),
@@ -286,6 +305,7 @@ class RagModule(Module):
             ),
             predictions=predictions[:MAX_RETURNED_PREDICTIONS],
             session_id=active_session,
+            session_sources=[source for source, _ in documents],
         )
 
     def evaluate(self) -> MetricsReport:
@@ -334,34 +354,65 @@ class RagModule(Module):
             AgentTool(
                 name="search_knowledge",
                 description=(
-                    "Search the enterprise knowledge base (refund policy, retention playbook, "
-                    "SLA, model cards, data privacy, fraud protocol). Returns ranked passages "
-                    "with source files. Use this before answering any policy question."
+                    "Search the shipped sample knowledge corpus and, when a session_id is supplied, "
+                    "documents uploaded in that browser session. Returns ranked passages with "
+                    "the exact source filename, heading, and citation. Use before answering "
+                    "policy or uploaded-document questions; do not answer from memory when no "
+                    "passage grounds the response."
                 ),
                 module_id=self.id,
                 parameters_schema={
                     "type": "object",
                     "properties": {
                         "query": {"type": "string", "description": "What to look for."},
-                        "k": {"type": "integer", "description": "Passages to return.", "default": 5},
+                        "k": {"type": "integer", "description": "Passages to return (1–20).", "default": 5},
+                        "session_id": {
+                            "type": "string",
+                            "description": "Optional opaque browser session id; the hub supplies the active upload session automatically.",
+                        },
                     },
                     "required": ["query"],
                 },
             ),
             AgentTool(
                 name="list_knowledge_sources",
-                description="List the documents currently indexed in the knowledge base.",
+                description="List built-in documents and any uploaded files indexed in the active browser session.",
                 module_id=self.id,
-                parameters_schema={"type": "object", "properties": {}},
+                parameters_schema={
+                    "type": "object",
+                    "properties": {
+                        "session_id": {
+                            "type": "string",
+                            "description": "Optional opaque browser session id; the hub supplies the active upload session automatically.",
+                        },
+                    },
+                },
             ),
         ]
 
-    def tool_search_knowledge(self, query: str, k: int = 5) -> dict[str, Any]:
-        hits = self.retriever.search(query, k=k)
+    def tool_search_knowledge(
+        self,
+        query: str,
+        k: int = 5,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        query = query.strip()
+        if not query:
+            raise ValueError("query must not be empty.")
+        limit = max(1, min(int(k), 20))
+        session_documents = SESSION_CORPUS.documents(session_id)
+        retriever = self.retriever.with_documents(session_documents) if session_documents else self.retriever
+        hits = retriever.search(query, k=limit)
         label, decision, matched_terms = _grounding(query, hits)
         return {
             "query": query,
             "n_results": len(hits),
+            "session_sources": [source for source, _ in session_documents],
+            "session_requested": bool(session_id),
+            "session_scoped": bool(session_documents),
+            "session_context_status": (
+                "active" if session_documents else "expired_or_empty" if session_id else "not_requested"
+            ),
             # The verdict travels with the passages. Without it the agent receives bare cosine
             # scores and has no way to tell a grounded answer from a coincidental one.
             "grounding": label,
@@ -371,18 +422,24 @@ class RagModule(Module):
                 {"source": h.source, "heading": h.heading, "score": h.score, "snippet": h.snippet}
                 for h in hits
             ],
-            "citation": self.retriever.cite(hits),
+            "citation": retriever.cite(hits),
         }
 
-    def tool_list_knowledge_sources(self) -> dict[str, Any]:
-        r = self.retriever
+    def tool_list_knowledge_sources(self, session_id: str | None = None) -> dict[str, Any]:
+        base = self.retriever
+        session_documents = SESSION_CORPUS.documents(session_id)
+        retriever = base.with_documents(session_documents) if session_documents else base
+        session_sources = [source for source, _ in session_documents]
+        sources = sorted(set(base.sources).union(session_sources))
         out: dict[str, Any] = {
-            "n_documents": len(r.sources),
-            "n_passages": r.size,
-            "sources": r.sources,
+            "n_documents": len(sources),
+            "n_passages": retriever.size,
+            "sources": sources,
+            "session_sources": session_sources,
+            "session_requested": bool(session_id),
             # Where the corpus came from. Without this a Supabase outage looks identical to a
             # knowledge base that genuinely has six documents.
-            "corpus": corpus_status(r),
+            "corpus": corpus_status(base),
         }
         return out
 

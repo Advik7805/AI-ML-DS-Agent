@@ -25,8 +25,8 @@ const GUIDES = [
   },
   {
     id: "fraud",
-    purpose: "Catch suspicious transactions early while giving reviewers context for a careful hold decision.",
-    accepted: "CSV · transaction features; optional is_fraud outcome column",
+    purpose: "Score uploaded transactions, surface unusual patterns and give reviewers a reasoned hold decision.",
+    accepted: "CSV · 10 transaction features; optional is_fraud outcome column. Built-in examples are synthetic, not company data.",
     questions: [
       "What patterns make a card transaction look unusual?",
       "How does the fraud model handle a large late-night purchase abroad?",
@@ -55,8 +55,8 @@ const GUIDES = [
   },
   {
     id: "rag",
-    purpose: "Ask a policy or knowledge question and get a grounded answer with passages you can inspect.",
-    accepted: "Markdown, TXT or PDF · up to 2 MB extracted text per document; temporary session index",
+    purpose: "Search built-in policy and your uploaded files, then answer from ranked passages with exact file and heading citations.",
+    accepted: "Markdown, TXT or PDF · up to 2 MB extracted text per document; uploads stay in a temporary browser session",
     questions: [
       "Search the knowledge base for the refund window and cite the source.",
       "What discount can a retention agent approve?",

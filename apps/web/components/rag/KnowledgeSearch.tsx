@@ -30,6 +30,8 @@ interface SearchResult {
   decision: string;
   results: Hit[];
   citation: string;
+  session_sources?: string[];
+  session_scoped?: boolean;
 }
 
 /** Provenance of the loaded corpus. Mirrors `corpus_status()` in modules/rag/service.py. */
@@ -45,6 +47,8 @@ interface Sources {
   n_documents: number;
   n_passages: number;
   sources: string[];
+  session_sources?: string[];
+  session_requested?: boolean;
   /** Present once the API reports it. Optional so an older backend does not break the board. */
   corpus?: CorpusStatus;
 }
@@ -67,10 +71,16 @@ function verdictStyle(_grounding: string) {
   };
 }
 
+function sourceFilename(source: string) {
+  return source.lastIndexOf(".") > source.lastIndexOf("/") ? source : `${source}.md`;
+}
+
 export function KnowledgeSearch() {
   const [query, setQuery] = useState("");
   const [res, setRes] = useState<SearchResult | null>(null);
   const [sources, setSources] = useState<Sources | null>(null);
+  const [sessionId, setSessionId] = useState("");
+  const [sessionSources, setSessionSources] = useState<string[]>([]);
   const [sourcesBusy, setSourcesBusy] = useState(true);
   const [sourcesError, setSourcesError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -79,13 +89,30 @@ export function KnowledgeSearch() {
   const loadSources = useCallback(async () => {
     setSourcesBusy(true);
     setSourcesError(null);
+    let activeSession = "";
+    try {
+      activeSession = window.localStorage.getItem("saros-rag-session") ?? "";
+      setSessionId(activeSession);
+      const savedSources = JSON.parse(window.localStorage.getItem("saros-session-sources") ?? "[]") as unknown;
+      setSessionSources(Array.isArray(savedSources) ? savedSources.filter((item): item is string => typeof item === "string") : []);
+    } catch {
+      setSessionSources([]);
+    }
     try {
       const response = await clientFetch<{ result: Sources }>("/api/v1/agent/tools/list_knowledge_sources", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ arguments: {} }),
+        body: JSON.stringify({ arguments: activeSession ? { session_id: activeSession } : {} }),
       });
       setSources(response.result);
+      if (response.result.session_sources) {
+        setSessionSources(response.result.session_sources);
+        try {
+          window.localStorage.setItem("saros-session-sources", JSON.stringify(response.result.session_sources));
+        } catch {
+          /* session source names are just a display convenience */
+        }
+      }
     } catch (reason) {
       setSourcesError(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -104,12 +131,23 @@ export function KnowledgeSearch() {
     setBusy(true);
     setError(null);
     try {
+      const activeSession = sessionId || window.localStorage.getItem("saros-rag-session") || "";
       const r = await clientFetch<{ result: SearchResult }>("/api/v1/agent/tools/search_knowledge", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ arguments: { query: text, k: 5 } }),
+        body: JSON.stringify({
+          arguments: { query: text, k: 5, ...(activeSession ? { session_id: activeSession } : {}) },
+        }),
       });
       setRes(r.result);
+      if (r.result.session_sources) {
+        setSessionSources(r.result.session_sources);
+        try {
+          window.localStorage.setItem("saros-session-sources", JSON.stringify(r.result.session_sources));
+        } catch {
+          /* session source names are just a display convenience */
+        }
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -180,6 +218,11 @@ export function KnowledgeSearch() {
               <p className="mt-1.5 text-[12px] leading-relaxed" style={{ color: v.fg }}>
                 {res.decision}
               </p>
+              {res.session_sources && res.session_sources.length > 0 && (
+                <p className="mt-2 border-t border-line pt-2 text-[10px] leading-relaxed text-ink-faint">
+                  Searched this browser session's uploads: {res.session_sources.join(", ")}
+                </p>
+              )}
             </div>
 
             <div className="mt-4 space-y-2.5">
@@ -193,7 +236,7 @@ export function KnowledgeSearch() {
                 >
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
                     <div className="flex items-baseline gap-2">
-                      <span className="font-mono text-[10.5px] text-ink-faint">{h.source}.md</span>
+                      <span className="font-mono text-[10.5px] text-ink-faint">{sourceFilename(h.source)}</span>
                       <span className="text-[13px] font-medium">{h.heading}</span>
                     </div>
                     <span className="font-mono text-[11px] tabular-nums text-ink-dim">
@@ -231,14 +274,24 @@ export function KnowledgeSearch() {
             </div>
             <ul className="mt-3 space-y-1 border-t border-line pt-3">
               {sources.sources.map((s) => (
-                <li key={s} className="font-mono text-[11px] text-ink-dim">
-                  {s}
-                  {/* Only in-repo documents are files. Appending .md to a Supabase row would
-                      invent a filename that does not exist. */}
-                  {!sources.corpus?.external_live && ".md"}
-                </li>
+                <li key={s} className="font-mono text-[11px] text-ink-dim">{sourceFilename(s)}</li>
               ))}
             </ul>
+
+            <div className="mt-3 border-t border-line pt-3">
+              <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-faint">This browser session</div>
+              {sessionSources.length > 0 ? (
+                <ul className="mt-2 space-y-1">
+                  {sessionSources.map((source) => (
+                    <li key={source} className="font-mono text-[10px] text-ink-dim">{source}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-1 text-[10px] leading-relaxed text-ink-faint">
+                  No upload report is indexed here yet. Upload a supported file from the hub to make it searchable by the agent.
+                </p>
+              )}
+            </div>
 
             {sources.corpus && (
               <div className="mt-3 border-t border-line pt-3">

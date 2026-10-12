@@ -12,6 +12,8 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 import json
+from pathlib import Path
+import re
 import threading
 from typing import Any
 
@@ -120,6 +122,117 @@ registry = ModuleRegistry()
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 MAX_ANALYZE_QUERY_CHARS = 2_000
 MAX_ANALYZE_SESSION_ID_CHARS = 128
+MAX_SOURCE_LABEL_CHARS = 160
+
+
+def _safe_upload_name(filename: str | None) -> str:
+    """Return a display-safe basename without control-line injection or huge labels."""
+    raw = filename or "uploaded-file"
+    name = " ".join(Path(raw.replace(chr(92), "/")).name.split())
+    return name[:200] or "uploaded-file"
+
+
+def _analysis_report_text(analysis: UploadAnalysis, source_label: str | None) -> str:
+    """Create a compact, citable session document from a structured upload analysis."""
+    filename = _safe_upload_name(analysis.filename)
+    label = " ".join((source_label or "").split())
+    first_prediction = analysis.predictions[0] if analysis.predictions else None
+    features = (
+        ["sku", "price", "demand"]
+        if analysis.module_id == "pricing"
+        else sorted(first_prediction.inputs) if first_prediction else []
+    )
+
+    lines = [
+        f"# Uploaded analysis report: {filename}",
+        "",
+        "## Dataset provenance",
+        f"- File: {filename}",
+        f"- Analysis body: {analysis.module_id}",
+        f"- Rows analyzed: {analysis.n_rows:,}",
+        (
+            f"- Uploader-provided company/source label (not independently verified): {label}"
+            if label
+            else "- Company/source: Not specified by the uploader; no organization is inferred from this file."
+        ),
+        "",
+        "## Model and analysis basis",
+        "- The existing body analyzer was applied to the uploaded file; the upload did not retrain or replace the model.",
+        "- The raw structured table is not retained or indexed; follow-up Q&A can search aggregate metrics and the eight highest-ranked examples returned by this analyzer.",
+        f"- Model feature fields: {', '.join(features[:32]) if features else 'See the analyzer notes below.'}",
+    ]
+
+    if first_prediction:
+        meta = first_prediction.meta
+        method_keys = (
+            "model_source", "training_data_source", "training_rows", "model_basis",
+            "model_features", "decisive_model", "threshold", "supervised_score",
+            "unsupervised_score", "base_rate", "recommended_price", "elasticity",
+            "rul_cycles", "rul_cap", "uploaded_data",
+        )
+        details = [f"{key}={meta[key]}" for key in method_keys if key in meta]
+        if details:
+            lines.append(f"- Prediction metadata: {'; '.join(details)}")
+
+    lines.extend(["", "## Summary metrics"])
+    lines.append(f"- Analyzer positive_rate: {analysis.metrics.positive_rate:.4f}")
+    if analysis.module_id in {"churn", "fraud", "maintenance"}:
+        lines.append(f"- Operating threshold: {analysis.metrics.threshold:.4f}")
+    for name, value in sorted(analysis.metrics.scores.items()):
+        lines.append(f"- {name}: {value:.6g}")
+    for name, value in sorted(analysis.metrics.confusion.items()):
+        lines.append(f"- confusion_{name}: {value}")
+
+    lines.extend(["", "## Method notes and caveats"])
+    lines.extend(f"- {note}" for note in analysis.metrics.notes)
+    if analysis.predictions_truncated:
+        lines.append("- Returned predictions are truncated to the analyzer's 100-row response limit.")
+
+    if analysis.predictions:
+        section = "## Highest-ranked SKUs by estimated revenue uplift" if analysis.module_id == "pricing" else "## Highest-ranked returned examples"
+        lines.extend(["", section])
+        rank_key = (
+            (lambda item: float(item.meta.get("estimated_revenue_uplift", 0.0)))
+            if analysis.module_id == "pricing"
+            else (lambda item: item.score)
+        )
+        ranked = sorted(analysis.predictions, key=rank_key, reverse=True)[:8]
+        for index, prediction in enumerate(ranked, 1):
+            row = prediction.meta.get("row_index", index - 1)
+            if analysis.module_id == "pricing":
+                uplift = float(prediction.meta.get("estimated_revenue_uplift", 0.0)) * 100.0
+                heading = (
+                    f"### SKU {prediction.meta.get('sku', index)}: {prediction.label} "
+                    f"(estimated revenue uplift {uplift:+.1f}%)"
+                )
+            else:
+                heading = (
+                    f"### Example {index} — uploaded row {row}: {prediction.label} "
+                    f"(score {prediction.score:.4f})"
+                )
+            lines.append(heading)
+            lines.append(f"- Decision: {prediction.decision}")
+            if prediction.inputs:
+                values = ", ".join(
+                    f"{name}={value:.6g}"
+                    for name, value in sorted(prediction.inputs.items())[:32]
+                )
+                lines.append(f"- Model inputs: {values}")
+            if prediction.factors:
+                drivers = "; ".join(
+                    f"{item.feature}={item.value:g}, attribution {item.attribution:+.4g} ({item.direction})"
+                    for item in prediction.factors[:5]
+                )
+                lines.append(f"- Reported drivers: {drivers}")
+            for key in (
+                "decisive_model", "supervised_score", "unsupervised_score",
+                "threshold", "recommended_price", "estimated_revenue_uplift", "demand_floor",
+                "observed_price_range", "elasticity", "elasticity_ci", "r2", "n_obs", "rul_cycles",
+            ):
+                if key in prediction.meta:
+                    lines.append(f"- {key}: {prediction.meta[key]}")
+
+    return "\n".join(lines)
 
 
 #: Paths never metered. `/health` is hit by the keep-alive cron every 10 minutes and must not
@@ -277,9 +390,10 @@ async def analyze_upload(
     module_id: str,
     file: UploadFile | None = File(default=None),
     session_id: str | None = Form(default=None),
+    source_label: str | None = Form(default=None),
     query: str = Form(default=""),
 ) -> UploadAnalysis:
-    """Analyze a bounded upload without persisting it; RAG may reuse a session id."""
+    """Analyze a bounded upload in memory; optionally index its report for this session's agent."""
     try:
         module = registry.get(module_id)
     except KeyError as exc:
@@ -289,10 +403,19 @@ async def analyze_upload(
             status_code=422,
             detail=f"query cannot exceed {MAX_ANALYZE_QUERY_CHARS:,} characters.",
         )
-    if session_id is not None and len(session_id) > MAX_ANALYZE_SESSION_ID_CHARS:
+    if session_id is not None and (
+        len(session_id) > MAX_ANALYZE_SESSION_ID_CHARS
+        or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", session_id)
+    ):
         raise HTTPException(
             status_code=422,
-            detail=f"session_id cannot exceed {MAX_ANALYZE_SESSION_ID_CHARS} characters.",
+            detail="session_id must be 1–128 characters and contain only letters, numbers, hyphens, or underscores.",
+        )
+    source_label = " ".join((source_label or "").split()) or None
+    if source_label is not None and len(source_label) > MAX_SOURCE_LABEL_CHARS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"source_label cannot exceed {MAX_SOURCE_LABEL_CHARS} characters.",
         )
 
     filename: str | None = None
@@ -316,13 +439,38 @@ async def analyze_upload(
             raise HTTPException(status_code=422, detail="The uploaded file is empty.")
 
     try:
-        return await run_in_threadpool(
+        analysis_kwargs: dict[str, Any] = {"session_id": session_id, "query": query}
+        if module_id == "rag":
+            analysis_kwargs["source_label"] = source_label
+        analysis = await run_in_threadpool(
             module.analyze_upload,
             filename,
             content,
-            session_id=session_id,
-            query=query,
+            **analysis_kwargs,
         )
+        if filename:
+            analysis.filename = _safe_upload_name(filename)
+        analysis.source_label = source_label
+
+        if module_id != "rag" and content is not None:
+            # Keep only a compact, generated analysis report for Q&A—not the uploaded table.
+            from modules.rag.session_corpus import SESSION_CORPUS
+
+            report_stem = Path(_safe_upload_name(filename)).stem or "uploaded-file"
+            active_session, _ = SESSION_CORPUS.append(
+                session_id,
+                f"{report_stem}.analysis.md",
+                _analysis_report_text(analysis, source_label),
+            )
+            analysis.session_id = active_session
+
+        if analysis.session_id:
+            from modules.rag.session_corpus import SESSION_CORPUS
+
+            analysis.session_sources = [
+                source for source, _ in SESSION_CORPUS.documents(analysis.session_id)
+            ]
+        return analysis
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
     except NotImplementedError as exc:
@@ -402,6 +550,8 @@ class ChatRequest(BaseModel):
     #: Prior turns, oldest first. Kept client-supplied so the API stays stateless on a free
     #: tier, where a sleeping container would otherwise lose every conversation.
     history: list[dict[str, str]] = Field(default_factory=list)
+    #: Opaque browser-session key used only to retrieve that session's temporary uploads.
+    session_id: str | None = Field(default=None, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
 
 
 class ChatResponse(BaseModel):
@@ -445,7 +595,11 @@ def chat(body: ChatRequest) -> ChatResponse:
         raise HTTPException(status_code=503, detail="Agent not initialised.")
     if not body.message.strip():
         raise HTTPException(status_code=422, detail="message must not be empty.")
-    result = agent.run(body.message, history=_coerce_history(body.history))
+    result = agent.run(
+        body.message,
+        history=_coerce_history(body.history),
+        session_id=body.session_id,
+    )
     return ChatResponse(
         answer=result["answer"],
         provider=result["provider"],
@@ -466,7 +620,13 @@ async def chat_stream(body: ChatRequest):
         raise HTTPException(status_code=422, detail="message must not be empty.")
 
     async def events():
-        stream = iter(agent.stream(body.message, history=_coerce_history(body.history)))
+        stream = iter(
+            agent.stream(
+                body.message,
+                history=_coerce_history(body.history),
+                session_id=body.session_id,
+            )
+        )
         finished = object()
         while True:
             # LangGraph and model/tool implementations are synchronous. Advance them in a worker
