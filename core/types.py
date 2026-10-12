@@ -159,6 +159,10 @@ class ModuleManifest(BaseModel):
     capabilities: list[str] = Field(default_factory=list)
     routes: dict[str, str] = Field(default_factory=dict, description="e.g. {'ui': '/churn', 'api': '/api/v1/churn'}")
     tools: list[AgentTool] = Field(default_factory=list)
+    accepts: str = Field(
+        default="",
+        description="What file this body accepts in the upload studio, in one sentence.",
+    )
     dataset: "DatasetCard | None" = Field(
         default=None, description="Provenance for this body's data. Rendered on the body page."
     )
@@ -179,3 +183,42 @@ class MetricsReport(BaseModel):
     #: How the grouping was defined. Required whenever ``groups`` is non-empty, so a
     #: breakdown can never be reported without saying what it was sliced by.
     group_basis: str = ""
+
+
+class ColumnsReport(BaseModel):
+    """How an uploaded file's columns mapped onto a body's expected schema.
+
+    Reported instead of a bare pass/fail because "which of my columns did you actually use?" is
+    the first question anyone asks after uploading a file, and guessing the answer is how a user
+    ends up trusting a score computed from the wrong column.
+    """
+
+    expected: list[str] = Field(default_factory=list)
+    matched: list[str] = Field(default_factory=list)
+    missing: list[str] = Field(default_factory=list)
+    ignored: list[str] = Field(default_factory=list, description="Present in the file, unused by the model.")
+    recognised_optional: list[str] = Field(default_factory=list)
+
+
+class UploadAnalysis(BaseModel):
+    """The result of scoring one uploaded file — the same shapes the UI already renders.
+
+    ``metrics`` and ``predictions`` are the platform's existing ``MetricsReport`` and
+    ``Prediction``, so an uploaded-file panel needs no bespoke rendering path that could drift
+    away from the shipped-data one.
+    """
+
+    session_id: str
+    module_id: str
+    filename: str
+    size_bytes: int
+    kind: str = "unknown"
+    rows: int | None = None
+    columns_report: ColumnsReport = Field(default_factory=ColumnsReport)
+    threshold: float = 0.5
+    metrics: MetricsReport | None = None
+    predictions: list[Prediction] = Field(default_factory=list)
+    dataset: DatasetCard | None = None
+    preview: list[dict[str, Any]] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+    extra: dict[str, Any] = Field(default_factory=dict)

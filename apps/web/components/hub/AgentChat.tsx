@@ -35,12 +35,12 @@ interface Turn {
 }
 
 const SUGGESTIONS = [
-  "What are the churn model metrics?",
+  "What can this platform do?",
   "Rank the top 5 customers most likely to churn",
-  "How good is the fraud model?",
-  "Search the knowledge base for the refund window",
+  "How good is the fraud model, and at what operating point?",
+  "What is the refund window, and which document says so?",
   "Which engines need maintenance first?",
-  "Audit the diabetes model for fairness",
+  "What data is the pricing model trained on?",
 ];
 
 export function AgentChat() {
@@ -51,6 +51,7 @@ export function AgentChat() {
   const [live, setLive] = useState<boolean | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     clientFetch<{ provider: string; live: boolean; tools: string[]; note: string | null }>(
@@ -67,6 +68,19 @@ export function AgentChat() {
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [turns, busy]);
+
+  // Guide cards and the upload studio dispatch this so a click lands here, filled in and focused.
+  useEffect(() => {
+    const onAsk = (e: Event) => {
+      const detail = (e as CustomEvent<string>).detail;
+      if (typeof detail === "string" && detail.trim()) {
+        setInput(detail);
+        inputRef.current?.focus();
+      }
+    };
+    window.addEventListener("saros:ask", onAsk);
+    return () => window.removeEventListener("saros:ask", onAsk);
+  }, []);
 
   async function send(text: string) {
     const message = text.trim();
@@ -155,9 +169,15 @@ export function AgentChat() {
 
       <div className="mt-4 max-h-[420px] min-h-[120px] space-y-3 overflow-y-auto pr-1">
         {turns.length === 0 && (
-          <p className="py-6 text-center text-[12.5px] text-ink-faint">
-            Ask the agent to reach into any body. It will show its work.
-          </p>
+          <div className="py-6 text-center">
+            <p className="text-[12.5px] text-ink-dim">
+              Ask the agent to reach into any body. It plans, calls the tools, and shows its work.
+            </p>
+            <p className="mt-1.5 text-[11.5px] text-ink-faint">
+              23 tools across 7 bodies · upload a file under <em>Your data</em> and the agent can
+              answer about it in this conversation.
+            </p>
+          </div>
         )}
 
         {turns.map((t, i) => (
@@ -221,6 +241,7 @@ export function AgentChat() {
         className="mt-4 flex gap-2"
       >
         <input
+          ref={inputRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder="Ask across the bodies…"

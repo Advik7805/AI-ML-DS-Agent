@@ -143,8 +143,80 @@ class RagModule(Module):
             status="live",
             capabilities=["retrieval", "citations", "policy-lookup", "grounded-answers"],
             routes={"ui": "/rag", "api": "/api/v1/rag"},
+            accepts=self.upload_spec().get("accepts", ""),
             dataset=self.dataset_card(),
             tools=self.tools(),
+        )
+
+    def upload_spec(self) -> dict[str, Any]:
+        return {
+            "kind": "document",
+            "accepts": (
+                "A policy or reference document: .md, .txt, .pdf. It is chunked heading-wise and "
+                "added to a session-scoped overlay of the knowledge base, so you can ask questions "
+                "of it immediately and the answer cites your filename. Nothing is written to disk "
+                "and the shipped corpus is never modified."
+            ),
+            "required": [],
+            "optional": [],
+            "features": [],
+            "label": None,
+            "notes": [],
+        }
+
+    def analyze_upload(self, filename: str, data: bytes, session: Any) -> Any:
+        """Index this document for this session only, then report what became retrievable."""
+        from core.types import ColumnsReport, UploadAnalysis
+        from core.upload import chunk_document, extract_text, overlay_search, upload_dataset_card
+
+        text = extract_text(filename, data)
+        chunks = chunk_document(text)
+        source = filename.rsplit(".", 1)[0]
+        n_total = session.add_rag_passages(source, chunks)
+
+        # Prove it is retrievable rather than asserting it: probe with the document's own opening
+        # sentences and report what comes back. Probing with the *heading* returned nothing, because
+        # a heading is the chunk's label and is not always a token inside the chunk text — a
+        # self-check that fails on a good document is worse than no self-check.
+        probe = " ".join(str(chunks[0][1]).split())[:160] if chunks else source
+        hits = overlay_search(session, probe, k=3)
+
+        return UploadAnalysis(
+            session_id=session.id,
+            module_id=self.id,
+            filename=filename,
+            size_bytes=len(data),
+            kind="document",
+            rows=len(chunks),
+            columns_report=ColumnsReport(expected=[], matched=[], missing=[], ignored=[]),
+            metrics=MetricsReport(
+                n_samples=len(chunks),
+                positive_rate=1.0,
+                scores={
+                    "chunks_indexed": float(len(chunks)),
+                    "session_overlay_chunks": float(n_total),
+                    "shipped_corpus_passages": float(self.retriever.size),
+                },
+                notes=[
+                    f"'{filename}' is retrievable in this session only. Ask the agent about it — "
+                    "the answer will cite this filename alongside the shipped corpus documents.",
+                    "Your document is ranked in a separate index from the shipped corpus, so its "
+                    "scores are reported separately rather than blended into one misleading number.",
+                ],
+            ),
+            predictions=[],
+            dataset=upload_dataset_card(self, filename, len(chunks), []),
+            preview=[{"heading": h, "text": " ".join(t.split())[:220]} for h, t in chunks[:5]],
+            notes=[
+                "Nothing was written to disk. A new session starts from the shipped corpus.",
+                f"Self-check: searching this session's overlay for '{probe}' returned "
+                f"{len(hits)} passage(s) from {sorted({h['source'] for h in hits}) or 'nothing'}.",
+            ],
+            extra={
+                "accepts": self.upload_spec()["accepts"],
+                "session_overlay_chunks": n_total,
+                "self_check": hits,
+            },
         )
 
     def predict(self, payload: dict[str, Any]) -> Prediction:

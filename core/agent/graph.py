@@ -162,9 +162,22 @@ class HubAgent:
 
     # --- entry points --------------------------------------------------------
 
-    def run(self, user_input: str, history: list[Message] | None = None) -> dict[str, Any]:
-        """Run one full turn. Returns the answer plus the trace the UI renders as a timeline."""
+    def run(
+        self,
+        user_input: str,
+        history: list[Message] | None = None,
+        context: str | None = None,
+    ) -> dict[str, Any]:
+        """Run one full turn. Returns the answer plus the trace the UI renders as a timeline.
+
+        ``context`` is session-supplied material — the profile of files the user uploaded, plus
+        passages retrieved from them for this question. It goes in as a second system message so
+        the agent can answer about a file it has never been trained on, without the context
+        leaking into the chat history the browser sends back.
+        """
         messages = [Message(role="system", content=SYSTEM_PROMPT)]
+        if context:
+            messages.append(Message(role="system", content=context))
         messages.extend(history or [])
         messages.append(Message(role="user", content=user_input))
 
@@ -188,9 +201,16 @@ class HubAgent:
             "tools_used": [t["tool"] for t in final_state.get("trace", []) if t.get("tool")],
         }
 
-    def stream(self, user_input: str, history: list[Message] | None = None):
+    def stream(
+        self,
+        user_input: str,
+        history: list[Message] | None = None,
+        context: str | None = None,
+    ):
         """Yield each node's update as it happens, so the UI can show the agent thinking."""
         messages = [Message(role="system", content=SYSTEM_PROMPT)]
+        if context:
+            messages.append(Message(role="system", content=context))
         messages.extend(history or [])
         messages.append(Message(role="user", content=user_input))
 

@@ -246,9 +246,37 @@ class XaiHealthModule(Module):
             status="live",
             capabilities=["classification", "shap-xai", "fairness-audit", "imputation"],
             routes={"ui": "/diagnostics", "api": "/api/v1/xai_health"},
+            accepts=self.upload_spec().get("accepts", ""),
             dataset=self.dataset_card(),
             tools=self.tools(),
         )
+
+    def upload_spec(self) -> dict[str, Any]:
+        """A screening export. Missing values are expected — zero is a sentinel in the source data."""
+        from .data import FEATURES, TARGET
+
+        return {
+            "kind": "csv",
+            "accepts": (
+                "CSV, one row per screened person, with the 8 clinical columns (pregnancies, "
+                "glucose, blood_pressure, skin_thickness, insulin, bmi, diabetes_pedigree, age). "
+                "Add an 'outcome' label for accuracy and a fairness slice."
+            ),
+            "required": list(FEATURES),
+            "optional": [TARGET, "age_band", "screening_id"],
+            "features": list(FEATURES),
+            "label": TARGET,
+            "aliases": {
+                TARGET: ["diabetes", "diabetic", "label"],
+                "blood_pressure": ["bloodpressure", "bp", "diastolic"],
+                "skin_thickness": ["skinthickness"],
+                "diabetes_pedigree": ["diabetespedigreefunction", "pedigree"],
+            },
+            "notes": [
+                "Blank or zero glucose/BMI values are imputed by the fitted pipeline rather than "
+                "treated as real readings — a zero blood pressure would otherwise look healthy.",
+            ],
+        }
 
     def predict(self, payload: dict[str, Any]) -> Prediction:
         bundle = self.bundle

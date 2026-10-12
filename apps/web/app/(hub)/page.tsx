@@ -5,6 +5,8 @@ import { IntegrationsPanel } from "@/components/hub/IntegrationsPanel";
 import { RunLog } from "@/components/hub/RunLog";
 import { ModuleGraph } from "@/components/hub/ModuleGraph";
 import { TenantPanel } from "@/components/hub/TenantPanel";
+import { UploadStudio } from "@/components/hub/UploadStudio";
+import { Guide } from "@/components/hub/Guide";
 import { getModules } from "@/lib/api";
 import type { ModuleManifest } from "@/lib/types";
 import { KNOWN_BODIES } from "@/lib/types";
@@ -86,6 +88,26 @@ export default async function HubPage() {
           </div>
         )}
       </section>
+
+      {/* --- analyze your own data ------------------------------------------- */}
+      <section id="upload" className="scroll-mt-20 border-t border-line px-6 py-16 sm:px-10">
+        <div className="mx-auto max-w-4xl">
+          <h2 className="text-2xl font-semibold tracking-tight">Bring your own data</h2>
+          <p className="mt-3 text-[15px] leading-relaxed text-ink-dim">
+            Every body accepts a file. A CSV is scored by that body&rsquo;s model and comes back in
+            the same shape the shipped-tenant results use — plus a mapping panel that says which of
+            your columns were actually used. A policy document is chunked into the knowledge base
+            for your session. Nothing is written to disk, and the agent can be asked about the file
+            you just dropped.
+          </p>
+          <div className="mt-8">
+            <UploadStudio modules={modules} />
+          </div>
+        </div>
+      </section>
+
+      {/* --- guide ------------------------------------------------------------ */}
+      <Guide modules={modules} />
 
       {/* --- bodies ---------------------------------------------------------- */}
       <section id="bodies" className="scroll-mt-20 px-6 py-20 sm:px-10">

@@ -96,6 +96,8 @@ export interface ModuleManifest {
   capabilities: string[];
   routes: Record<string, string>;
   tools: AgentTool[];
+  /** What file this body accepts in the upload studio, in one sentence. */
+  accepts: string;
   dataset: DatasetCard | null;
 }
 

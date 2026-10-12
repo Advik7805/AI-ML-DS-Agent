@@ -55,6 +55,18 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
               The company
             </Link>
             <Link
+              href="#upload"
+              className="rounded-lg px-3 py-1.5 text-ink-dim transition hover:bg-white/5 hover:text-ink"
+            >
+              Your data
+            </Link>
+            <Link
+              href="#guide"
+              className="rounded-lg px-3 py-1.5 text-ink-dim transition hover:bg-white/5 hover:text-ink"
+            >
+              Guide
+            </Link>
+            <Link
               href="#bodies"
               className="rounded-lg px-3 py-1.5 text-ink-dim transition hover:bg-white/5 hover:text-ink"
             >

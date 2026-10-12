@@ -89,9 +89,42 @@ class ChurnModule(Module):
             status="live",
             capabilities=["classification", "imbalance-handling", "calibration", "shap-xai", "ranking"],
             routes={"ui": "/churn", "api": "/api/v1/churn"},
+            accepts=self.upload_spec().get("accepts", ""),
             dataset=self.dataset_card(),
             tools=self.tools(),
         )
+
+    def upload_spec(self) -> dict[str, Any]:
+        """What a subscriber extract from your side needs to look like."""
+        from .data import BINARY_FEATURES, NUMERIC_FEATURES, TARGET
+
+        return {
+            "kind": "csv",
+            "accepts": (
+                "CSV, one row per customer. 13 model columns (11 numeric + international_plan, "
+                "voice_mail_plan as 0/1 or yes/no). Optional: state, area_code, *_charge columns, "
+                "and a 'churn' label to score the model against your own outcomes."
+            ),
+            "required": [*NUMERIC_FEATURES, *BINARY_FEATURES],
+            "optional": ["state", "area_code", "customer_id", "total_day_charge", "total_eve_charge",
+                         "total_night_charge", "total_intl_charge", TARGET],
+            "features": [*NUMERIC_FEATURES, *BINARY_FEATURES],
+            "label": TARGET,
+            "aliases": {
+                TARGET: ["churned", "is_churn", "churn_flag"],
+                "number_customer_service_calls": ["service_calls", "custserv_calls"],
+                "international_plan": ["intl_plan"],
+                "voice_mail_plan": ["vmail_plan"],
+                "total_day_minutes": ["day_mins", "total_day_mins"],
+                "total_eve_minutes": ["eve_mins"],
+                "total_night_minutes": ["night_mins"],
+                "total_intl_minutes": ["intl_mins"],
+            },
+            "notes": [
+                "Columns are matched case- and punctuation-insensitively: 'Total Day Minutes' "
+                "works as well as 'total_day_minutes'.",
+            ],
+        }
 
     def predict(self, payload: dict[str, Any]) -> Prediction:
         bundle = self.bundle

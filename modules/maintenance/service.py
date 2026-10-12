@@ -192,9 +192,54 @@ class MaintenanceModule(Module):
             status="live",
             capabilities=["regression", "time-series", "grouped-cv", "shap-xai"],
             routes={"ui": "/maintenance", "api": "/api/v1/maintenance"},
+            accepts=self.upload_spec().get("accepts", ""),
             dataset=self.dataset_card(),
             tools=self.tools(),
         )
+
+    def upload_spec(self) -> dict[str, Any]:
+        """A telemetry extract in the CMAPSS layout, or a CSV that names the same columns."""
+        from .data import FEATURES, SENSORS, SETTINGS
+
+        return {
+            "kind": "telemetry",
+            "names": ["unit", "cycle", *SETTINGS, *SENSORS],
+            "accepts": (
+                "Whitespace-delimited, no header, 26 columns — unit, cycle, 6 operational "
+                "settings, 21 sensors (the NASA CMAPSS train_FD001.txt layout). A CSV whose "
+                "header names those columns is accepted too; add an 'rul' column to score the "
+                "model against your own remaining-life labels."
+            ),
+            "required": ["unit", "cycle", *FEATURES],
+            "optional": ["rul"],
+            # The real FD001 file has 3 settings; the schema carries 6. Padding is explicit.
+            "pad": ["setting4", "setting5", "setting6"],
+            "pad_value": 0.0,
+            "features": list(FEATURES),
+            "label": None,
+            "aliases": {
+                "unit": ["engine", "engine_id", "asset_id"],
+                "cycle": ["timestep", "time_cycle"],
+            },
+            "notes": [
+                "Readings are scored per cycle: the risk column is 1 − RUL/RUL_CAP, so the "
+                "engine closest to failure sorts first. Rows beyond the last recorded cycle for "
+                "an engine are not extrapolated.",
+            ],
+        }
+
+    def score_frame(self, X: "Any") -> tuple[list[float], dict[str, Any]]:
+        """RUL is a regression, so 'risk' is the normalised distance to end of life."""
+        from .data import RUL_CAP
+
+        bundle = self.bundle
+        rul = bundle.model.predict(X)
+        risks = [float(min(max(float(r), 0.0), RUL_CAP) / RUL_CAP) for r in rul]
+        # Risk ascending = cycles remaining descending, which is the order an MRO planner works in.
+        return [1.0 - r for r in risks], {
+            "space": "1 - RUL/RUL_CAP",
+            "rul_cycles": [round(float(r), 1) for r in rul[:25]],
+        }
 
     def predict(self, payload: dict[str, Any]) -> Prediction:
         bundle = self.bundle

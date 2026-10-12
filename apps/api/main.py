@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 import json
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -23,7 +23,14 @@ from core.agent.graph import HubAgent
 from core.agent.providers import Message, get_provider
 from core.contract import ModuleRegistry
 from core.integrations.ratelimit import get_limiter
-from core.types import DatasetCard, Explanation, MetricsReport, ModuleManifest, Prediction
+from core.types import (
+    DatasetCard,
+    Explanation,
+    MetricsReport,
+    ModuleManifest,
+    Prediction,
+    UploadAnalysis,
+)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -118,6 +125,8 @@ class PredictRequest(BaseModel):
 
 class ToolCallRequest(BaseModel):
     arguments: dict[str, Any] = Field(default_factory=dict)
+    #: Optional: makes session-uploaded documents visible to knowledge tools.
+    session_id: str | None = None
 
 
 class ToolCallResponse(BaseModel):
@@ -226,6 +235,144 @@ def metrics(module_id: str) -> MetricsReport:
         raise HTTPException(status_code=501, detail=str(exc)) from None
 
 
+# --- analyze your own data ------------------------------------------------------
+#
+# One endpoint for every body. The multipart file is read into memory under a hard cap, scored,
+# and dropped: nothing here touches the filesystem, which is why a stranger's export cannot end
+# up in the next visitor's knowledge base.
+
+
+async def _read_capped(file: UploadFile, limit: int) -> bytes:
+    """Read at most ``limit`` bytes. The cap is enforced *while* reading, not after.
+
+    A 10 MB check that only runs once the whole body is in memory does not protect a 512 MB
+    instance from a 2 GB upload.
+    """
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > limit:
+            raise HTTPException(
+                status_code=413,
+                detail={
+                    "message": (
+                        f"'{file.filename}' is larger than the {limit // (1024 * 1024)} MB cap."
+                    ),
+                    "max_bytes": limit,
+                    "hint": (
+                        "This endpoint processes in memory on a free tier. Send a sample of the "
+                        "file — a few thousand rows is enough to see how the model behaves — or "
+                        "split it and upload the parts in sequence."
+                    ),
+                },
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _upload_session(request: Request, session_id: str | None) -> Any:
+    from core.sessions import STORE
+
+    return STORE.get_or_create(session_id or request.headers.get("x-saros-session"))
+
+
+@app.post("/api/v1/modules/{module_id}/analyze", response_model=UploadAnalysis)
+async def analyze_upload(
+    module_id: str,
+    request: Request,
+    file: UploadFile,
+    session_id: str | None = Form(default=None),
+) -> UploadAnalysis:
+    """Score *your* file with this body's model. In memory, capped, never persisted.
+
+    Returns the same ``MetricsReport`` and ``Prediction`` shapes the body's own pages render, so
+    a result computed on your data sits next to the shipped-tenant result without a second
+    rendering path — and the ``columns_report`` says which of your columns were actually used.
+    """
+    try:
+        module = registry.get(module_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from None
+
+    from core.upload import MAX_FILE_BYTES
+    from core.upload import UploadRejected as Rejected
+
+    data = await _read_capped(file, MAX_FILE_BYTES)
+    if not data:
+        raise HTTPException(status_code=422, detail={"message": "The uploaded file is empty."})
+
+    session = _upload_session(request, session_id)
+    filename = (file.filename or "upload").strip()
+
+    try:
+        result = module.analyze_upload(filename, data, session)
+    except Rejected as exc:
+        # A refusal that names the columns is the whole feature. 422 + structured detail.
+        raise HTTPException(status_code=422, detail=exc.as_detail()) from None
+    except NotImplementedError as exc:
+        raise HTTPException(status_code=501, detail=str(exc)) from None
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={"message": str(exc)}) from None
+
+    from core.sessions import UploadRecord
+
+    session.add(
+        UploadRecord(
+            upload_id=f"u_{len(session.uploads) + 1}",
+            filename=filename,
+            module_id=module_id,
+            size_bytes=len(data),
+            kind=result.kind,
+            rows=result.rows,
+            columns=[str(c) for c in result.preview[0].keys()] if result.preview else [],
+            summary={
+                k: v
+                for k, v in {
+                    "rows_scored": result.rows,
+                    "chunks_indexed": (result.metrics.scores or {}).get("chunks_indexed")
+                    if result.metrics
+                    else None,
+                    "top_score": max((p.score for p in result.predictions), default=None),
+                    "expected_columns": ", ".join(result.columns_report.expected[:13]) or None,
+                }.items()
+                if v is not None
+            },
+        )
+    )
+    return result
+
+
+@app.get("/api/v1/sessions/{session_id}")
+def session_state(session_id: str) -> dict[str, Any]:
+    """What this session has uploaded, so the UI can show it after a reload.
+
+    In-memory and TTL'd: an expired id returns ``exists: false`` with the limits, which is
+    clearer than a 404 that looks like an error.
+    """
+    from core.sessions import STORE
+
+    session = STORE.get(session_id)
+    if session is None:
+        return {
+            "exists": False,
+            "session_id": session_id,
+            "uploads": [],
+            "limits": STORE.stats(),
+            "note": "No session with this id in this process. Uploads are in-memory and expire.",
+        }
+    return {
+        "exists": True,
+        "session_id": session.id,
+        "uploads": [u.as_dict() for u in session.uploads],
+        "rag_overlay_chunks": len(session.rag_passages),
+        "limits": STORE.stats(),
+    }
+
+
 @app.post("/api/v1/modules/{module_id}/train", response_model=MetricsReport)
 def train(module_id: str, body: ToolCallRequest | None = None) -> MetricsReport:
     try:
@@ -300,6 +447,22 @@ def call_tool(tool_name: str, body: ToolCallRequest) -> ToolCallResponse:
         raise HTTPException(status_code=404, detail=str(exc)) from None
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
+
+    # A document uploaded this session must be visible to the knowledge tool, or "upload a
+    # policy and ask about it" would silently only work through the chat path.
+    if body.session_id and tool_name == "search_knowledge" and isinstance(result, dict):
+        from core.sessions import STORE
+        from core.upload import overlay_search
+
+        session = STORE.get(body.session_id)
+        if session is not None and session.rag_passages:
+            overlay = overlay_search(session, str(body.arguments.get("query", "")), k=3)
+            result["session_overlay"] = overlay
+            result["session_overlay_note"] = (
+                "Passages from documents uploaded in this session, ranked in a separate TF-IDF "
+                "space from the shipped corpus — so the two score lists are reported separately "
+                "rather than blended into one ranking."
+            )
     return ToolCallResponse(tool=tool_name, module_id=owner.id, result=result)
 
 
@@ -311,6 +474,9 @@ class ChatRequest(BaseModel):
     #: Prior turns, oldest first. Kept client-supplied so the API stays stateless on a free
     #: tier, where a sleeping container would otherwise lose every conversation.
     history: list[dict[str, str]] = Field(default_factory=list)
+    #: The browser session whose uploads should be visible to the agent. Optional: without it
+    #: the agent answers over the shipped tenant data exactly as before.
+    session_id: str | None = None
 
 
 class ChatResponse(BaseModel):
@@ -319,6 +485,40 @@ class ChatResponse(BaseModel):
     tools_used: list[str]
     trace: list[dict[str, Any]]
     error: str | None = None
+
+
+def _session_context(session_id: str | None, question: str) -> str | None:
+    """Build the agent's context from this session's uploads — including per-question retrieval.
+
+    Two parts, because they answer different questions:
+
+    * the *profile* — which files were uploaded, how many rows, which columns, what the body
+      found. Without it the agent cannot talk about "my file" at all.
+    * the *retrieved passages* — for documents uploaded to the Knowledge body, the chunks that
+      match *this* question, retrieved now rather than pasted in whole. That is what makes a
+      document upload a working RAG rather than a file attachment.
+    """
+    if not session_id:
+        return None
+    from core.sessions import STORE
+    from core.upload import overlay_search
+
+    session = STORE.get(session_id)
+    if session is None or (not session.uploads and not session.rag_passages):
+        return None
+
+    parts = [session.context_block()]
+    if session.rag_passages:
+        hits = overlay_search(session, question, k=4)
+        if hits:
+            lines = [
+                "PASSAGES RETRIEVED FROM THE USER'S UPLOADED DOCUMENTS for this question. If you "
+                "use them, cite the filename exactly as given.",
+            ]
+            for h in hits:
+                lines.append(f"- `{h['source']}` → {h['heading']} (relevance {h['score']}): {h['snippet']}")
+            parts.append("\n".join(lines))
+    return "\n\n".join(p for p in parts if p)
 
 
 def _coerce_history(raw: list[dict[str, str]]) -> list[Message]:
@@ -363,7 +563,11 @@ def chat(body: ChatRequest) -> ChatResponse:
         raise HTTPException(status_code=503, detail="Agent not initialised.")
     if not body.message.strip():
         raise HTTPException(status_code=422, detail="message must not be empty.")
-    result = agent.run(body.message, history=_coerce_history(body.history))
+    result = agent.run(
+        body.message,
+        history=_coerce_history(body.history),
+        context=_session_context(body.session_id, body.message),
+    )
     return ChatResponse(
         answer=result["answer"],
         provider=result["provider"],
@@ -382,7 +586,11 @@ async def chat_stream(body: ChatRequest):
         raise HTTPException(status_code=503, detail="Agent not initialised.")
 
     async def events():
-        for update in agent.stream(body.message, history=_coerce_history(body.history)):
+        for update in agent.stream(
+            body.message,
+            history=_coerce_history(body.history),
+            context=_session_context(body.session_id, body.message),
+        ):
             yield {"event": update.get("node", "update"), "data": json.dumps(update, default=str)}
 
     return EventSourceResponse(events())

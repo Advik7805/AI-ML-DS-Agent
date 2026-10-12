@@ -154,6 +154,45 @@ class Module(ABC):
             yield {}
         raise NotImplementedError(f"{self.id} does not implement stream()")
 
+    # --- upload surface --------------------------------------------------------
+
+    def upload_spec(self) -> dict[str, Any]:
+        """What this body accepts as an uploaded file. Empty means it accepts none.
+
+        Keeping the schema on the body (rather than in a table in the gateway) means a body that
+        gains a column cannot forget to update the validator: ``required`` here is the same
+        ``FEATURES`` list the model trains on.
+        """
+        return {}
+
+    def score_frame(self, X: "Any") -> tuple[list[float], dict[str, Any]]:
+        """Vectorised scoring for a whole uploaded frame.
+
+        The default finds the body's classifier and takes the positive-class probability. A
+        regression body overrides this; the point of the default is that the five classifiers
+        need no upload-specific code at all.
+        """
+        bundle = self.bundle
+        model = (
+            getattr(bundle, "supervised", None)
+            or getattr(bundle, "model", None)
+            or getattr(bundle, "pipeline", None)
+        )
+        if model is None:  # pragma: no cover - a body with a bundle but no estimator
+            raise NotImplementedError(f"{self.id} cannot score a frame: no estimator on the bundle.")
+        proba = model.predict_proba(X)
+        positive = proba[:, -1] if proba.shape[1] > 1 else proba[:, 0]
+        return [float(v) for v in positive], {"space": "probability"}
+
+    def analyze_upload(self, filename: str, data: bytes, session: Any) -> Any:
+        """Score an uploaded file. Default: the generic CSV path driven by :meth:`upload_spec`."""
+        spec = self.upload_spec()
+        if not spec:
+            raise NotImplementedError(f"{self.id} does not accept uploads.")
+        from core.upload import analyze_generic
+
+        return analyze_generic(self, filename, data, session, spec)
+
     # --- agent dispatch --------------------------------------------------------
 
     def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:

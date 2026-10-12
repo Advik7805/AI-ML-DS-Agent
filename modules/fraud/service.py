@@ -85,9 +85,41 @@ class FraudModule(Module):
             status="live",
             capabilities=["classification", "anomaly-detection", "imbalance-handling", "streaming", "shap-xai"],
             routes={"ui": "/fraud", "api": "/api/v1/fraud"},
+            accepts=self.upload_spec().get("accepts", ""),
             dataset=self.dataset_card(),
             tools=self.tools(),
         )
+
+    def upload_spec(self) -> dict[str, Any]:
+        """A batch of authorisations from your own ledger."""
+        from .data import FEATURES, TARGET
+
+        return {
+            "kind": "csv",
+            "accepts": (
+                "CSV, one row per authorisation, with the 10 model columns (amount, hour_of_day, "
+                "distance_from_home_km, txn_count_1h, distinct_merchants_24h, card_age_days, "
+                "avg_amount_30d, is_night, is_foreign, pin_used). Include an 'is_fraud' label to "
+                "get precision/recall against your own confirmed cases."
+            ),
+            "required": list(FEATURES),
+            "optional": ["auth_id", "customer_id", "merchant", "currency", TARGET],
+            "features": list(FEATURES),
+            "label": TARGET,
+            "aliases": {
+                TARGET: ["fraud", "is_fraudulent", "confirmed_fraud", "label"],
+                "distance_from_home_km": ["distance_km", "distance_from_home"],
+                "txn_count_1h": ["transactions_last_hour", "velocity_1h"],
+                "distinct_merchants_24h": ["merchants_24h"],
+                "card_age_days": ["card_age"],
+                "avg_amount_30d": ["avg_amount"],
+            },
+            "notes": [
+                "The upload path scores with the supervised model. The isolation-forest half is "
+                "fitted on the tenant's training distribution, so it would mark an unfamiliar "
+                "batch as novel by construction — which is a property of your data, not a verdict.",
+            ],
+        }
 
     def predict(self, payload: dict[str, Any]) -> Prediction:
         bundle = self.bundle
