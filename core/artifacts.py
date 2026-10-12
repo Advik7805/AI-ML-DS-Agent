@@ -24,7 +24,9 @@ from pathlib import Path
 from typing import Any
 
 #: Bumped whenever any cached bundle's fields change.
-SCHEMA = 2
+#: 3: trainable bundles gained `report`, so a reload no longer has to retrain (or, worse,
+#:    invent zeros) to answer "how was this model evaluated?".
+SCHEMA = 3
 
 
 class StaleArtifactError(ValueError):

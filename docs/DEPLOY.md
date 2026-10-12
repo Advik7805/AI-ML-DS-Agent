@@ -77,6 +77,30 @@ Two things already handle it:
 The browser never learns the API's address — `next.config.ts` rewrites `/api/*` and `/health`
 server-side, which is also what makes the preview URLs work and removes CORS from the picture.
 
+### Verify it in a browser, not with curl
+
+A deploy can return a perfect 200 for every route and still be unusable: if the page never
+hydrates, every control is inert and the HTML looks identical. That is a real failure mode here —
+see note 8 in [BUILD-NOTES.md](BUILD-NOTES.md) — so there is a script for it:
+
+```bash
+cd apps/web
+npm install --no-save puppeteer-core @sparticuz/chromium
+BASE=https://your-app.vercel.app node scripts/browser-check.mjs
+```
+
+It loads all eight routes, asserts each one hydrates and makes no failing API call, clicks through
+all seven body chips in the upload studio, and drops a file if you give it one
+(`FILE=/path/to.csv`). Non-zero exit means something a screenshot would not show you.
+
+### If you serve a preview URL from `next dev`
+
+Add the host to `allowedDevOrigins` — it is already covered for `localhost`, `127.0.0.1`, `0.0.0.0`,
+`*.e2b.app` and `*.vercel.app`. For anything else, set `SAROS_DEV_ORIGINS=host-a,host-b` in the
+environment before starting the dev server. Next 16 blocks dev resources from unknown origins, and
+because the dev client waits for its HMR socket before hydrating, a blocked request means the page
+renders and no control on it works. Production builds are unaffected.
+
 ---
 
 ## 4. Light up the integrations, one at a time
@@ -152,6 +176,8 @@ Worth understanding before you debug a "why is this still mock?" question.
 | Symptom | Cause | Fix |
 |---|---|---|
 | Pages render, every API call fails | `API_ORIGIN` unset or wrong | Set it in Vercel; no trailing slash |
+| Pages render, **nothing is clickable** | Dev resources blocked for this origin (dev server only) | Add the host to `allowedDevOrigins` / set `SAROS_DEV_ORIGINS`, restart `next dev` |
+| A body chip or file drop does nothing | The page never hydrated — same cause as above | Check the browser console for a blocked `/_next/hmr` request; run `scripts/browser-check.mjs` |
 | First request after idle takes ~60s | Render free tier spin-down | Normal. Add the `SAROS_API_URL` secret |
 | Agent answers look templated | `SAROS_LLM=mock` | Set a key and `SAROS_LLM=groq`/`gemini` |
 | Web search returns placeholders | Tavily key set but flag off | Also set `SAROS_TAVILY_LIVE=1` |

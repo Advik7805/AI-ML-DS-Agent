@@ -59,9 +59,9 @@ const SUGGESTIONS = [
 ];
 
 function verdictStyle(grounding: string) {
-  if (grounding === "Well grounded") return { bg: "#f0fdf4", fg: "#166534", border: "#bbf7d0" };
-  if (grounding === "Weak grounding") return { bg: "#fffbeb", fg: "#92400e", border: "#fde68a" };
-  return { bg: "#fef2f2", fg: "#991b1b", border: "#fecaca" };
+  if (grounding === "Well grounded") return { bg: "#f0fdf4", fg: "#6ee7b7", border: "#bbf7d0" };
+  if (grounding === "Weak grounding") return { bg: "rgba(245,158,11,0.10)", fg: "var(--color-churn)", border: "rgba(245,158,11,0.35)" };
+  return { bg: "rgba(239,68,68,0.10)", fg: "#fca5a5", border: "rgba(239,68,68,0.30)" };
 }
 
 export function KnowledgeSearch() {
@@ -105,7 +105,7 @@ export function KnowledgeSearch() {
 
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
-      <div className="rounded-2xl border border-[#e7e0d5] bg-white p-6 shadow-sm">
+      <div className="rounded-2xl border border-line bg-void-3 p-6 shadow-sm">
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -117,7 +117,7 @@ export function KnowledgeSearch() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Ask the corpus…"
-            className="flex-1 rounded-xl border border-[#e7e0d5] px-3.5 py-2.5 text-[13px] outline-none focus:border-[#0284c7]"
+            className="flex-1 rounded-xl border border-line px-3.5 py-2.5 text-[13px] outline-none focus:border-[#0284c7]"
           />
           <button
             type="submit"
@@ -135,7 +135,7 @@ export function KnowledgeSearch() {
               <button
                 key={s}
                 onClick={() => void run(s)}
-                className="rounded-full border border-[#e7e0d5] px-2.5 py-1 text-[11.5px] text-[#57534e] transition hover:border-[#0284c7] hover:text-[#0284c7]"
+                className="rounded-full border border-line px-2.5 py-1 text-[11.5px] text-ink-dim transition hover:border-[#0284c7] hover:text-[#0284c7]"
               >
                 {s}
               </button>
@@ -144,7 +144,7 @@ export function KnowledgeSearch() {
         )}
 
         {error && (
-          <div className="mt-4 rounded-xl border border-[#fecaca] bg-[#fef2f2] p-4 text-[12.5px] text-[#991b1b]">
+          <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-[12.5px] text-red-300">
             {error}
           </div>
         )}
@@ -176,24 +176,24 @@ export function KnowledgeSearch() {
                   initial={{ opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.05 }}
-                  className="rounded-xl border border-[#f5f5f4] p-4"
+                  className="rounded-xl border border-white/5 p-4"
                 >
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
                     <div className="flex items-baseline gap-2">
-                      <span className="font-mono text-[10.5px] text-[#a8a29e]">{h.source}.md</span>
+                      <span className="font-mono text-[10.5px] text-ink-faint">{h.source}.md</span>
                       <span className="text-[13px] font-medium">{h.heading}</span>
                     </div>
-                    <span className="font-mono text-[11px] tabular-nums text-[#78716c]">
+                    <span className="font-mono text-[11px] tabular-nums text-ink-dim">
                       {h.score.toFixed(3)}
                     </span>
                   </div>
-                  <p className="mt-2 text-[12.5px] leading-relaxed text-[#57534e]">{h.snippet}</p>
+                  <p className="mt-2 text-[12.5px] leading-relaxed text-ink-dim">{h.snippet}</p>
                 </motion.article>
               ))}
             </div>
 
             {res.results.length === 0 && (
-              <p className="mt-4 rounded-xl border border-[#fecaca] bg-[#fef2f2] p-4 text-[12.5px] text-[#991b1b]">
+              <p className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-[12.5px] text-red-300">
                 Nothing in the corpus matches. The honest answer is &ldquo;I don&rsquo;t know&rdquo;,
                 not a plausible guess.
               </p>
@@ -204,19 +204,19 @@ export function KnowledgeSearch() {
 
       <div className="space-y-3">
         {sources && (
-          <div className="rounded-2xl border border-[#e7e0d5] bg-white p-5 shadow-sm">
-            <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-[#a8a29e]">
+          <div className="rounded-2xl border border-line bg-void-3 p-5 shadow-sm">
+            <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-ink-faint">
               Corpus
             </div>
             <div className="mt-2 text-3xl font-semibold tabular-nums tracking-tight">
               {sources.n_documents}
             </div>
-            <div className="text-[12px] text-[#57534e]">
+            <div className="text-[12px] text-ink-dim">
               documents · {sources.n_passages} passages
             </div>
-            <ul className="mt-3 space-y-1 border-t border-[#f5f5f4] pt-3">
+            <ul className="mt-3 space-y-1 border-t border-white/5 pt-3">
               {sources.sources.map((s) => (
-                <li key={s} className="font-mono text-[11px] text-[#78716c]">
+                <li key={s} className="font-mono text-[11px] text-ink-dim">
                   {s}
                   {/* Only in-repo documents are files. Appending .md to a Supabase row would
                       invent a filename that does not exist. */}
@@ -226,14 +226,14 @@ export function KnowledgeSearch() {
             </ul>
 
             {sources.corpus && (
-              <div className="mt-3 border-t border-[#f5f5f4] pt-3">
+              <div className="mt-3 border-t border-white/5 pt-3">
                 <div className="flex items-center gap-1.5">
                   <span
                     className={`h-1.5 w-1.5 rounded-full ${
-                      sources.corpus.external_live ? "bg-[#0284c7]" : "bg-[#d6d3d1]"
+                      sources.corpus.external_live ? "bg-[#0284c7]" : "bg-line"
                     }`}
                   />
-                  <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#a8a29e]">
+                  <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-faint">
                     {sources.corpus.external_live
                       ? `live · ${sources.corpus.n_external_passages} extra passages`
                       : "in-repo corpus only"}
@@ -243,7 +243,7 @@ export function KnowledgeSearch() {
                     Supabase outage is indistinguishable from a knowledge base that genuinely
                     has six documents — and the answers stay confident either way. */}
                 {sources.corpus.warning && (
-                  <p className="mt-2 rounded-md bg-[#fef2f2] p-2 text-[10.5px] leading-relaxed text-[#b91c1c]">
+                  <p className="mt-2 rounded-md bg-red-500/10 p-2 text-[10.5px] leading-relaxed text-red-300">
                     {sources.corpus.warning}
                   </p>
                 )}
@@ -252,16 +252,16 @@ export function KnowledgeSearch() {
           </div>
         )}
 
-        <div className="rounded-2xl border border-[#e7e0d5] bg-white p-5 shadow-sm">
-          <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-[#a8a29e]">
+        <div className="rounded-2xl border border-line bg-void-3 p-5 shadow-sm">
+          <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-ink-faint">
             Grounding rule
           </div>
-          <p className="mt-2 text-[11.5px] leading-relaxed text-[#57534e]">
+          <p className="mt-2 text-[11.5px] leading-relaxed text-ink-dim">
             A verdict rests on how many <em>substantive</em> query terms appear in the top
             passage, not on the cosine. On a 25-passage corpus TF-IDF tops out near 0.22 even for
             obviously-relevant questions, so a similarity floor would reject everything.
           </p>
-          <p className="mt-2 border-t border-[#f5f5f4] pt-2 text-[11px] leading-relaxed text-[#a8a29e]">
+          <p className="mt-2 border-t border-white/5 pt-2 text-[11px] leading-relaxed text-ink-faint">
             One shared token is not grounding: &ldquo;airspeed velocity of an unladen swallow&rdquo;
             matches the fraud protocol on &ldquo;velocity&rdquo; alone.
           </p>

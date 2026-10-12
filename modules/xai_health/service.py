@@ -34,6 +34,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 
 from core.contract import Module
+from core.tenant import prediction_meta
 from core.types import AgentTool, Explanation, FeatureAttribution, MetricsReport, ModuleManifest, Prediction
 
 from .data import FEATURES, TARGET, load_diabetes
@@ -51,13 +52,29 @@ class HealthModel:
     metrics: dict[str, float] = field(default_factory=dict)
     source: str = "synthetic"
     trained_at: str = ""
+    #: Full source-frame size, for the provenance card.
+    n_rows: int = 0
     notes: list[str] = field(default_factory=list)
+    #: The evaluation this bundle was judged by, carried with the model (see core/artifacts).
+    report: "MetricsReport | None" = None
 
     def frame(self, payload: dict[str, Any]) -> pd.DataFrame:
         missing = [f for f in self.feature_names if f not in payload]
         if missing:
             raise ValueError(f"Missing required features: {', '.join(missing)}")
-        row = {f: (np.nan if payload[f] is None else float(payload[f])) for f in self.feature_names}
+        row: dict[str, float] = {}
+        not_numeric: list[str] = []
+        for f in self.feature_names:
+            value = payload[f]
+            if value is None:
+                row[f] = np.nan
+                continue
+            try:
+                row[f] = float(value)
+            except (TypeError, ValueError):
+                not_numeric.append(f)
+        if not_numeric:
+            raise ValueError(f"These features must be numbers: {', '.join(not_numeric)}")
         return pd.DataFrame([row], columns=self.feature_names)
 
     def predict_proba(self, payload: dict[str, Any]) -> float:
@@ -114,6 +131,7 @@ def train_health(*, random_state: int = 5) -> tuple[HealthModel, MetricsReport]:
         feature_names=list(FEATURES),
         source=source,
         trained_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        n_rows=len(df),
         notes=notes,
     )
 
@@ -191,6 +209,7 @@ def train_health(*, random_state: int = 5) -> tuple[HealthModel, MetricsReport]:
         group_basis="age band (a proxy — this dataset has no race or gender field)",
     )
     bundle.metrics = scores
+    bundle.report = report
     return bundle, report
 
 
@@ -209,6 +228,9 @@ class XaiHealthModule(Module):
                 if self._bundle is None:
                     try:
                         self._bundle = HealthModel.load()
+                        # Restore the evaluation this model was judged by instead of retraining
+                        # on first /metrics (see core/artifacts).
+                        self._report = self._bundle.report
                     except Exception:  # noqa: BLE001
                         self._bundle, self._report = train_health()
                         self._bundle.save()
@@ -234,14 +256,45 @@ class XaiHealthModule(Module):
             summary=(
                 "Diabetes risk scoring with per-patient SHAP explanations and a Fairlearn group "
                 "fairness audit. Optimises for false-negative rate, because in screening a "
-                "missed diagnosis is the harm that matters."
+                "missed diagnosis is the harm that matters. Data: Northwind Care's employee screening pilot "
+                "— the public Pima Indians Diabetes study, 768 records, with a Fairlearn group audit "
+                "because the decision is clinical."
             ),
             accent=ACCENT,
             status="live",
             capabilities=["classification", "shap-xai", "fairness-audit", "imputation"],
             routes={"ui": "/diagnostics", "api": "/api/v1/xai_health"},
+            accepts=self.upload_spec().get("accepts", ""),
+            dataset=self.dataset_card(),
             tools=self.tools(),
         )
+
+    def upload_spec(self) -> dict[str, Any]:
+        """A screening export. Missing values are expected — zero is a sentinel in the source data."""
+        from .data import FEATURES, TARGET
+
+        return {
+            "kind": "csv",
+            "accepts": (
+                "CSV, one row per screened person, with the 8 clinical columns (pregnancies, "
+                "glucose, blood_pressure, skin_thickness, insulin, bmi, diabetes_pedigree, age). "
+                "Add an 'outcome' label for accuracy and a fairness slice."
+            ),
+            "required": list(FEATURES),
+            "optional": [TARGET, "age_band", "screening_id"],
+            "features": list(FEATURES),
+            "label": TARGET,
+            "aliases": {
+                TARGET: ["diabetes", "diabetic", "label"],
+                "blood_pressure": ["bloodpressure", "bp", "diastolic"],
+                "skin_thickness": ["skinthickness"],
+                "diabetes_pedigree": ["diabetespedigreefunction", "pedigree"],
+            },
+            "notes": [
+                "Blank or zero glucose/BMI values are imputed by the fitted pipeline rather than "
+                "treated as real readings — a zero blood pressure would otherwise look healthy.",
+            ],
+        }
 
     def predict(self, payload: dict[str, Any]) -> Prediction:
         bundle = self.bundle
@@ -264,11 +317,12 @@ class XaiHealthModule(Module):
             inputs={k: float(payload[k]) for k in bundle.feature_names if payload.get(k) is not None},
             factors=factors,
             explanation=explanation,
-            meta={
-                "threshold": bundle.threshold,
-                "source": bundle.source,
-                "warning": "Decision support only. Not a diagnostic device.",
-            },
+            meta=prediction_meta(
+                "xai_health",
+                threshold=bundle.threshold,
+                source=bundle.source,
+                warning="Decision support only. Not a diagnostic device.",
+            ),
         )
 
     def _safe_explain(self, payload: dict[str, Any]) -> Explanation | None:

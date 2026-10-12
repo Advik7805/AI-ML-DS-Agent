@@ -21,6 +21,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import GroupKFold
 
 from core.contract import Module
+from core.tenant import prediction_meta
 from core.types import AgentTool, Explanation, FeatureAttribution, MetricsReport, ModuleManifest, Prediction
 
 from .data import FEATURES, RUL_CAP, SENSORS, SETTINGS, load_cmapss, synthesize
@@ -37,7 +38,11 @@ class RulModel:
     metrics: dict[str, float] = field(default_factory=dict)
     source: str = "synthetic"
     trained_at: str = ""
+    #: Full source-frame size, so the provenance card can report rows read, not just rows fitted.
+    n_rows: int = 0
     notes: list[str] = field(default_factory=list)
+    #: The evaluation this bundle was judged by, carried with the model (see core/artifacts).
+    report: "MetricsReport | None" = None
     #: Training distribution per feature, so incoming telemetry can be checked for drift.
     reference: dict = field(default_factory=dict)
 
@@ -123,6 +128,7 @@ def train_rul(*, random_state: int = 11) -> tuple[RulModel, MetricsReport]:
         metrics=scores,
         source=source,
         trained_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        n_rows=len(df),
         notes=notes,
         reference={c: np.asarray(X[c].values, dtype=float) for c in feature_cols},
     )
@@ -133,6 +139,7 @@ def train_rul(*, random_state: int = 11) -> tuple[RulModel, MetricsReport]:
         scores=scores,
         notes=[*notes, *(f"MAE in {k}: {v:.2f} cycles." for k, v in band_mae.items())],
     )
+    bundle.report = report
     return bundle, report
 
 
@@ -151,10 +158,11 @@ class MaintenanceModule(Module):
                 if self._bundle is None:
                     try:
                         self._bundle = RulModel.load()
-                        self._report = MetricsReport(
-                            n_samples=0, positive_rate=0.0, scores=self._bundle.metrics,
-                            notes=self._bundle.notes,
-                        )
+                        # Restore the evaluation the bundle was trained under. It used to be
+                        # rebuilt here as n_samples=0 / positive_rate=0.0, which the model card
+                        # then displayed as fact. `None` is handled by `evaluate()`, which
+                        # retrains rather than inventing numbers.
+                        self._report = self._bundle.report
                     except Exception:  # noqa: BLE001
                         self._bundle, self._report = train_rul()
                         self._bundle.save()
@@ -180,14 +188,62 @@ class MaintenanceModule(Module):
             summary=(
                 "Remaining-useful-life regression on turbofan sensor telemetry, cross-validated "
                 "by engine so the error is measured on hardware the model never saw. Error is "
-                "reported per remaining-life band, because overall RMSE hides where it fails."
+                "reported per remaining-life band, because overall RMSE hides where it fails. Data: Northwind "
+                "Industrial's engine telemetry — NASA CMAPSS FD001 (100 engines, 20,631 cycles), or a "
+                "schema-compatible generator when the file is absent."
             ),
             accent=ACCENT,
             status="live",
             capabilities=["regression", "time-series", "grouped-cv", "shap-xai"],
             routes={"ui": "/maintenance", "api": "/api/v1/maintenance"},
+            accepts=self.upload_spec().get("accepts", ""),
+            dataset=self.dataset_card(),
             tools=self.tools(),
         )
+
+    def upload_spec(self) -> dict[str, Any]:
+        """A telemetry extract in the CMAPSS layout, or a CSV that names the same columns."""
+        from .data import FEATURES, SENSORS, SETTINGS
+
+        return {
+            "kind": "telemetry",
+            "names": ["unit", "cycle", *SETTINGS, *SENSORS],
+            "accepts": (
+                "Whitespace-delimited, no header, 26 columns — unit, cycle, 6 operational "
+                "settings, 21 sensors (the NASA CMAPSS train_FD001.txt layout). A CSV whose "
+                "header names those columns is accepted too; add an 'rul' column to score the "
+                "model against your own remaining-life labels."
+            ),
+            "required": ["unit", "cycle", *FEATURES],
+            "optional": ["rul"],
+            # The real FD001 file has 3 settings; the schema carries 6. Padding is explicit.
+            "pad": ["setting4", "setting5", "setting6"],
+            "pad_value": 0.0,
+            "features": list(FEATURES),
+            "label": None,
+            "aliases": {
+                "unit": ["engine", "engine_id", "asset_id"],
+                "cycle": ["timestep", "time_cycle"],
+            },
+            "notes": [
+                "Readings are scored per cycle: the risk column is 1 − RUL/RUL_CAP, so the "
+                "engine closest to failure sorts first. Rows beyond the last recorded cycle for "
+                "an engine are not extrapolated.",
+            ],
+        }
+
+    def score_frame(self, X: "Any") -> tuple[list[float], dict[str, Any]]:
+        """RUL is a regression, so 'risk' is the normalised distance to end of life."""
+        from .data import RUL_CAP
+
+        bundle = self.bundle
+        rul = bundle.model.predict(X)
+        risks = [float(min(max(float(r), 0.0), RUL_CAP) / RUL_CAP) for r in rul]
+        # Risk ascending = cycles remaining descending, which is the order an MRO planner works in.
+        return [1.0 - r for r in risks], {
+            "space": "1 - RUL/RUL_CAP",
+            "rul_cycles": [round(float(r), 1) for r in rul[:25]],
+        }
 
     def predict(self, payload: dict[str, Any]) -> Prediction:
         bundle = self.bundle
@@ -211,7 +267,13 @@ class MaintenanceModule(Module):
             decision=decision,
             inputs={k: float(payload[k]) for k in bundle.feature_names if payload.get(k) is not None},
             factors=self._drivers(payload),
-            meta={"rul_cycles": round(rul, 1), "rul_cap": RUL_CAP, "source": bundle.source},
+            meta=prediction_meta(
+                "maintenance",
+                rul_cycles=round(rul, 1),
+                rul_cap=RUL_CAP,
+                source=bundle.source,
+                asset_id=f"NW-E-{int(payload.get('unit', 0)):03d}" if payload.get("unit") else None,
+            ),
         )
 
     def _drivers(self, payload: dict[str, Any], k: int = 5) -> list[FeatureAttribution]:
@@ -317,19 +379,27 @@ class MaintenanceModule(Module):
         latest = df.sort_values("cycle").groupby("unit").tail(1).reset_index(drop=True)
         ruls = np.clip(bundle.model.predict(latest[cols]), 0, RUL_CAP)
         order = np.argsort(ruls)[:n]
-        return {
-            "n_engines": int(latest["unit"].nunique()),
-            "data_source": source,
-            "engines": [
-                {
-                    "unit": int(latest.iloc[i]["unit"]),
-                    "cycle": int(latest.iloc[i]["cycle"]),
-                    "predicted_rul": round(float(ruls[i]), 1),
-                    "urgency": round(float(1 - ruls[i] / RUL_CAP), 3),
-                }
-                for i in order
-            ],
-        }
+        from core.tenant import asset_id, provenance_block
+
+        ranked = [
+            {
+                # The asset id is the same key the tenant registry publishes, so a row here can be
+                # quoted in a work order or joined to the part price on the pricing board.
+                "unit": int(latest.iloc[i]["unit"]),
+                "asset_id": asset_id(int(latest.iloc[i]["unit"])),
+                "cycle": int(latest.iloc[i]["cycle"]),
+                "predicted_rul": round(float(ruls[i]), 1),
+                "urgency": round(float(1 - ruls[i] / RUL_CAP), 3),
+                "rul_cap": RUL_CAP,
+            }
+            for i in order
+        ]
+        return provenance_block(
+            self.id,
+            n_engines=int(latest["unit"].nunique()),
+            data_source=source,
+            engines=ranked,
+        )
 
     def tool_check_fleet_drift(self, n_engines: int = 20) -> dict[str, Any]:
         """Compare fresh telemetry against the distribution the RUL model was trained on.

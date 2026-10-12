@@ -23,7 +23,14 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Callable
 from typing import Any
 
-from core.types import AgentTool, Explanation, MetricsReport, ModuleManifest, Prediction
+from core.types import (
+    AgentTool,
+    DatasetCard,
+    Explanation,
+    MetricsReport,
+    ModuleManifest,
+    Prediction,
+)
 
 
 class Module(ABC):
@@ -82,6 +89,45 @@ class Module(ABC):
     def manifest(self) -> ModuleManifest:
         """Static description the hub renders as a tile and uses for routing."""
 
+    def dataset_card(self) -> DatasetCard:
+        """Provenance for this body's data: company, file, rows, key, caveats.
+
+        Defaults to the tenant registry entry, enriched with anything the body has actually
+        observed. A body with a real dataset overrides only the observed part, so a card can
+        never silently disagree with the data that was loaded.
+        """
+        from core.tenant import dataset_for
+
+        return dataset_for(self.id, **self.dataset_runtime())
+
+    def dataset_runtime(self) -> dict[str, Any]:
+        """What this body has observed so far, read from state that is *already* loaded.
+
+        Deliberately never triggers a load or a train: this runs while a manifest is being
+        built, and a manifest call that trains a model would make the hub's tiles slow. A body
+        that has not touched its data yet simply reports the shipped expectation from the
+        registry, which is the honest answer at that point.
+        """
+        bundle = getattr(self, "_bundle", None)
+        if bundle is None:
+            return {}
+        out: dict[str, Any] = {}
+        rows = getattr(bundle, "n_rows", None)
+        basis = "full source frame"
+        if not rows:
+            # An artifact trained before n_rows existed, or a body that only keeps its fit set.
+            # Report it — but say what it is, rather than passing a training split off as a
+            # row count for the whole dataset.
+            rows = getattr(bundle, "n_train", None)
+            basis = "training split"
+        source = getattr(bundle, "source", None)
+        if rows:
+            out["rows"] = int(rows)
+            out["basis"] = basis
+        if source:
+            out["source"] = str(source)
+        return out
+
     @abstractmethod
     def predict(self, payload: dict[str, Any]) -> Prediction:
         """Score one record. Must never raise on bad input — return a 422-shaped error instead."""
@@ -108,6 +154,45 @@ class Module(ABC):
             yield {}
         raise NotImplementedError(f"{self.id} does not implement stream()")
 
+    # --- upload surface --------------------------------------------------------
+
+    def upload_spec(self) -> dict[str, Any]:
+        """What this body accepts as an uploaded file. Empty means it accepts none.
+
+        Keeping the schema on the body (rather than in a table in the gateway) means a body that
+        gains a column cannot forget to update the validator: ``required`` here is the same
+        ``FEATURES`` list the model trains on.
+        """
+        return {}
+
+    def score_frame(self, X: "Any") -> tuple[list[float], dict[str, Any]]:
+        """Vectorised scoring for a whole uploaded frame.
+
+        The default finds the body's classifier and takes the positive-class probability. A
+        regression body overrides this; the point of the default is that the five classifiers
+        need no upload-specific code at all.
+        """
+        bundle = self.bundle
+        model = (
+            getattr(bundle, "supervised", None)
+            or getattr(bundle, "model", None)
+            or getattr(bundle, "pipeline", None)
+        )
+        if model is None:  # pragma: no cover - a body with a bundle but no estimator
+            raise NotImplementedError(f"{self.id} cannot score a frame: no estimator on the bundle.")
+        proba = model.predict_proba(X)
+        positive = proba[:, -1] if proba.shape[1] > 1 else proba[:, 0]
+        return [float(v) for v in positive], {"space": "probability"}
+
+    def analyze_upload(self, filename: str, data: bytes, session: Any) -> Any:
+        """Score an uploaded file. Default: the generic CSV path driven by :meth:`upload_spec`."""
+        spec = self.upload_spec()
+        if not spec:
+            raise NotImplementedError(f"{self.id} does not accept uploads.")
+        from core.upload import analyze_generic
+
+        return analyze_generic(self, filename, data, session, spec)
+
     # --- agent dispatch --------------------------------------------------------
 
     def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
@@ -119,7 +204,30 @@ class Module(ABC):
         if handler is None or not callable(handler):
             available = ", ".join(t.name for t in self.tools()) or "none"
             raise KeyError(f"{self.id} has no tool '{name}'. Available: {available}")
-        return handler(**arguments)
+
+        # Check the call against the published schema *before* dispatch, so a typo in an argument
+        # name comes back as "you sent X, it accepts Y" rather than an unhandled TypeError.
+        tool = next((t for t in self.tools() if t.name == name), None)
+        schema = (tool.parameters_schema if tool is not None else None) or {}
+        props = schema.get("properties") or {}
+        accepts = ", ".join(props) or "no arguments"
+        missing = [k for k in (schema.get("required") or []) if k not in arguments]
+        if missing:
+            raise ValueError(
+                f"{name} is missing required argument(s): {', '.join(missing)}. "
+                f"It accepts: {accepts}."
+            )
+        if props:
+            unknown = [k for k in arguments if k not in props]
+            if unknown:
+                raise ValueError(
+                    f"{name} got argument(s) it does not define: {', '.join(unknown)}. "
+                    f"It accepts: {accepts}."
+                )
+        try:
+            return handler(**arguments)
+        except TypeError as exc:
+            raise ValueError(f"{name} could not bind its arguments ({exc}). It accepts: {accepts}.") from None
 
 
 class ModuleRegistry:

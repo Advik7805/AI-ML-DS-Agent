@@ -4,6 +4,9 @@ import { AgentChat } from "@/components/hub/AgentChat";
 import { IntegrationsPanel } from "@/components/hub/IntegrationsPanel";
 import { RunLog } from "@/components/hub/RunLog";
 import { ModuleGraph } from "@/components/hub/ModuleGraph";
+import { TenantPanel } from "@/components/hub/TenantPanel";
+import { UploadStudio } from "@/components/hub/UploadStudio";
+import { Guide } from "@/components/hub/Guide";
 import { getModules } from "@/lib/api";
 import type { ModuleManifest } from "@/lib/types";
 import { KNOWN_BODIES } from "@/lib/types";
@@ -63,14 +66,20 @@ export default async function HubPage() {
               Many independent bodies.
             </span>
           </h1>
-          <p className="mx-auto mt-6 max-w-xl text-[15px] leading-relaxed text-ink-dim">
-            The senior data scientist&rsquo;s toolchain assembled into one connected product —
-            retrieval, streaming anomaly detection, forecasting, explainable AI, pricing and
-            churn — reachable through a single agent that can call any of them.
+          <p className="mx-auto mt-6 max-w-2xl text-[15px] leading-relaxed text-ink-dim">
+            Ask in plain English, or drop in your own CSV, PDF or text file — Saros scores churn,
+            flags fraud transaction by transaction, forecasts which engine fails next, prices SKUs
+            and answers policy questions, then explains every decision with cited evidence. All
+            seven tools run on one fictional company&rsquo;s data, so the numbers connect instead of
+            floating free.
           </p>
         </div>
 
         <ModuleGraph live={modules} />
+
+        <div id="tenant" className="mx-auto mt-10 max-w-6xl scroll-mt-24">
+          <TenantPanel modules={modules} />
+        </div>
 
         {error && (
           <div className="mx-auto mt-2 max-w-xl rounded-xl border border-churn/30 bg-churn/5 px-4 py-3 text-center text-xs text-churn">
@@ -79,6 +88,26 @@ export default async function HubPage() {
           </div>
         )}
       </section>
+
+      {/* --- analyze your own data ------------------------------------------- */}
+      <section id="upload" className="scroll-mt-20 border-t border-line px-6 py-16 sm:px-10">
+        <div className="mx-auto max-w-4xl">
+          <h2 className="text-2xl font-semibold tracking-tight">Bring your own data</h2>
+          <p className="mt-3 text-[15px] leading-relaxed text-ink-dim">
+            Every body accepts a file. A CSV is scored by that body&rsquo;s model and comes back in
+            the same shape the shipped-tenant results use — plus a mapping panel that says which of
+            your columns were actually used. A policy document is chunked into the knowledge base
+            for your session. Nothing is written to disk, and the agent can be asked about the file
+            you just dropped.
+          </p>
+          <div className="mt-8">
+            <UploadStudio modules={modules} />
+          </div>
+        </div>
+      </section>
+
+      {/* --- guide ------------------------------------------------------------ */}
+      <Guide modules={modules} />
 
       {/* --- bodies ---------------------------------------------------------- */}
       <section id="bodies" className="scroll-mt-20 px-6 py-20 sm:px-10">

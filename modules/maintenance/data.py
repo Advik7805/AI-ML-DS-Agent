@@ -54,12 +54,46 @@ FEATURES: tuple[str, ...] = tuple(SETTINGS) + tuple(SENSORS)
 RUL_CAP = 125
 
 
+def cmapss_columns(n_columns: int) -> list[str] | None:
+    """Column names for a CMAPSS-shaped table, by width.
+
+    The real FD001 file has **26** columns: unit, cycle, three operational settings and 21
+    sensors. The generator here emits 29 (six settings), because the settings beyond the first
+    are carried as constant columns so every CMAPSS variant fits the same schema.
+
+    Reconciling the two matters: the loader previously demanded 29 names for a 26-column file,
+    so a real FD001 drop-in produced either a wrong-shaped frame or a parse error — the docstring
+    promised a drop-in and the code did not deliver one. A 26-column file is now padded with the
+    three constant settings, and the padding is stated in the metrics notes rather than hidden.
+    """
+    n_settings = n_columns - 2 - len(SENSORS)
+    if n_settings == len(SETTINGS):
+        return ["unit", "cycle", *SETTINGS, *SENSORS]
+    if n_settings == 3:
+        return ["unit", "cycle", "setting1", "setting2", "setting3", *SENSORS]
+    return None
+
+
+def _pad_missing_settings(df: pd.DataFrame) -> pd.DataFrame:
+    """Fill settings the source file does not carry with the constant the model was trained on."""
+    for col in SETTINGS:
+        if col not in df.columns:
+            df[col] = 0.0
+    return df
+
+
 def load_cmapss(path: Path = CMAPSS_PATH) -> tuple[pd.DataFrame, Literal["cmapss-fd001", "synthetic"]]:
     """Load the real FD001 file if present, else generate a compatible one."""
     if path.exists() and path.stat().st_size > 100_000:
-        cols = ["unit", "cycle", *SETTINGS, *SENSORS]
-        df = pd.read_csv(path, sep=r"\s+", header=None, names=cols)
-        df = df.dropna(axis=1, how="all")
+        probe = pd.read_csv(path, sep=r"\s+", header=None, nrows=1)
+        names = cmapss_columns(probe.shape[1])
+        if names is None:
+            raise ValueError(
+                f"{path.name} has {probe.shape[1]} columns; expected 26 (real FD001) or "
+                f"{2 + len(SETTINGS) + len(SENSORS)} (this repo's generated layout)."
+            )
+        df = pd.read_csv(path, sep=r"\s+", header=None, names=names)
+        df = _pad_missing_settings(df.dropna(axis=1, how="all"))
         return df, "cmapss-fd001"
     return synthesize(), "synthetic"
 

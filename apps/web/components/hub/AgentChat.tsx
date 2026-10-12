@@ -12,6 +12,7 @@ import { motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 
 import { clientFetch } from "@/lib/api";
+import { readSessionId, useSessionId } from "@/lib/session";
 
 interface TraceEntry {
   node?: string;
@@ -35,12 +36,12 @@ interface Turn {
 }
 
 const SUGGESTIONS = [
-  "What are the churn model metrics?",
+  "What can this platform do?",
   "Rank the top 5 customers most likely to churn",
-  "How good is the fraud model?",
-  "Search the knowledge base for the refund window",
+  "How good is the fraud model, and at what operating point?",
+  "What is the refund window, and which document says so?",
   "Which engines need maintenance first?",
-  "Audit the diabetes model for fairness",
+  "What data is the pricing model trained on?",
 ];
 
 export function AgentChat() {
@@ -48,21 +49,60 @@ export function AgentChat() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [provider, setProvider] = useState<string>("");
+  const [live, setLive] = useState<boolean | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  // Counted from the API rather than written into the copy — see the note in the empty state.
+  const [toolCount, setToolCount] = useState(0);
+  const [bodyCount, setBodyCount] = useState(0);
   const endRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // The same id the upload studio uses, so a file dropped there is visible here.
+  const session = useSessionId();
 
   useEffect(() => {
-    clientFetch<{ provider: string; tools: string[]; note: string | null }>("/api/v1/agent")
+    clientFetch<{ provider: string; live: boolean; tools: string[]; note: string | null }>(
+      "/api/v1/agent",
+    )
       .then((info) => {
         setProvider(info.provider);
+        setLive(info.live);
         setNote(info.note);
+        setToolCount(info.tools?.length ?? 0);
       })
       .catch(() => setNote("Agent endpoint unreachable."));
   }, []);
 
   useEffect(() => {
+    clientFetch<unknown[]>("/api/v1/modules")
+      .then((mods) => setBodyCount(Array.isArray(mods) ? mods.length : 0))
+      .catch(() => setBodyCount(0));
+  }, []);
+
+  useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [turns, busy]);
+
+  // Guide cards and the upload studio dispatch this. The question is sent, not just typed in:
+  // a sample question that fills the box and stops leaves the user one click short, and a click
+  // that appears to do nothing is the exact failure this project is trying to avoid. `busyRef`
+  // keeps the listener (attached once) from sending while a previous answer is still streaming.
+  const busyRef = useRef(busy);
+  busyRef.current = busy;
+  const sendRef = useRef(send);
+  sendRef.current = send;
+
+  useEffect(() => {
+    const onAsk = (e: Event) => {
+      const detail = (e as CustomEvent<string>).detail;
+      if (typeof detail !== "string" || !detail.trim()) return;
+      setInput(detail);
+      inputRef.current?.focus();
+      if (!busyRef.current) void sendRef.current(detail);
+    };
+    window.addEventListener("saros:ask", onAsk);
+    return () => window.removeEventListener("saros:ask", onAsk);
+  }, []);
 
   async function send(text: string) {
     const message = text.trim();
@@ -85,7 +125,9 @@ export function AgentChat() {
       }>("/api/v1/agent/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message, history }),
+        // session_id is what makes an uploaded file visible to the agent. Read fresh rather than
+        // from render state: the id can be minted by a click that happened after this render.
+        body: JSON.stringify({ message, history, session_id: session || readSessionId() }),
       });
       setTurns((t) => [
         ...t,
@@ -118,8 +160,32 @@ export function AgentChat() {
           </span>
           <span className="text-[13px] font-semibold">Hub agent</span>
         </div>
-        <span className="font-mono text-[10px] uppercase tracking-widest text-ink-faint">
-          {provider || "connecting"}
+        <span
+          className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-ink-faint"
+          title={
+            live === false
+              ? "No LLM key configured — responses are templated from real tool output."
+              : live === true
+                ? "A real model is reasoning over the tool results."
+                : undefined
+          }
+        >
+          {live !== null && (
+            <span
+              className="h-1.5 w-1.5 rounded-full"
+              style={{ background: live ? "#34d399" : "var(--color-ink-faint)" }}
+            />
+          )}
+          {provider ? (
+            <>
+              {provider}
+              <span className={live ? "text-emerald-400/80" : "text-ink-faint"}>
+                {live ? "· live" : "· mock"}
+              </span>
+            </>
+          ) : (
+            "connecting"
+          )}
         </span>
       </div>
 
@@ -127,9 +193,18 @@ export function AgentChat() {
 
       <div className="mt-4 max-h-[420px] min-h-[120px] space-y-3 overflow-y-auto pr-1">
         {turns.length === 0 && (
-          <p className="py-6 text-center text-[12.5px] text-ink-faint">
-            Ask the agent to reach into any body. It will show its work.
-          </p>
+          <div className="py-6 text-center">
+            <p className="text-[12.5px] text-ink-dim">
+              Ask the agent to reach into any body. It plans, calls the tools, and shows its work.
+            </p>
+            <p className="mt-1.5 text-[11.5px] text-ink-faint">
+              {/* Counted from the live registry, never typed: the number moved from 22 to 23 and
+                  back in this project's own history, and a wrong count is a small lie. */}
+              {toolCount > 0 ? `${toolCount} tools` : "Every tool"} across {bodyCount || "every"}{" "}
+              bod{bodyCount === 1 ? "y" : "ies"} · upload a file under <em>Your data</em> and the
+              agent can answer about it in this conversation.
+            </p>
+          </div>
         )}
 
         {turns.map((t, i) => (
@@ -193,6 +268,7 @@ export function AgentChat() {
         className="mt-4 flex gap-2"
       >
         <input
+          ref={inputRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder="Ask across the bodies…"

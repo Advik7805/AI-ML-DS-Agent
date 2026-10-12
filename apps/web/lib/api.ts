@@ -11,7 +11,7 @@
  *   makes the sandbox preview host work, and it removes CORS from the picture entirely.
  */
 
-import type { Explanation, MetricsReport, ModuleManifest, Prediction } from "./types";
+import type { DatasetCard, Explanation, MetricsReport, ModuleManifest, Prediction, Tenant } from "./types";
 
 const API_ORIGIN = process.env.API_ORIGIN ?? "http://127.0.0.1:8000";
 
@@ -38,9 +38,53 @@ export async function serverFetch<T>(path: string, init?: RequestInit): Promise<
   return parse<T>(res);
 }
 
-export async function clientFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, { ...init, cache: "no-store" });
-  return parse<T>(res);
+/**
+ * Waking-aware client fetch.
+ *
+ * A free-tier API sleeps after 15 minutes idle, so the first call after a nap *fails at the
+ * transport layer* and then succeeds about ten seconds later. Every board used to render that
+ * as a red error box, which is wrong twice over: the user did nothing wrong, and the correct
+ * guidance is "wait". This retries with backoff and announces itself through window events that
+ * a single `WakeIndicator` (mounted in each layout) renders once, instead of eleven components
+ * each inventing their own wording.
+ *
+ * A 4xx/5xx response is *not* retried: the API answered, so it is awake and the error is real.
+ */
+export const WAKE_EVENT = "saros:wake";
+export const AWAKE_EVENT = "saros:awake";
+const WAKE_BACKOFF_MS = [1200, 3500, 7000];
+
+function announce(event: string, detail?: unknown) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(event, { detail }));
+}
+
+export async function clientFetch<T>(
+  path: string,
+  init?: RequestInit,
+  options?: { retries?: number; label?: string },
+): Promise<T> {
+  const retries = options?.retries ?? WAKE_BACKOFF_MS.length;
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(path, { ...init, cache: "no-store" });
+      if (attempt > 0) announce(AWAKE_EVENT);
+      return await parse<T>(res);
+    } catch (e) {
+      // Distinguish "no HTTP response" (asleep / offline) from "the API said no".
+      const isHttpError = e instanceof Error && /^\d{3} /.test(e.message);
+      if (isHttpError || attempt === retries) {
+        if (attempt > 0) announce(AWAKE_EVENT);
+        throw e;
+      }
+      lastError = e;
+      announce(WAKE_EVENT, { attempt: attempt + 1, retries, label: options?.label ?? path });
+      await new Promise((r) => setTimeout(r, WAKE_BACKOFF_MS[Math.min(attempt, WAKE_BACKOFF_MS.length - 1)]));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
 // --- typed helpers -----------------------------------------------------------
@@ -53,6 +97,17 @@ export const getModule = (id: string, server = true) =>
 
 export const getMetrics = (id: string, server = true) =>
   (server ? serverFetch : clientFetch)<MetricsReport>(`/api/v1/modules/${id}/metrics`);
+
+export const getDataset = (id: string, server = true) =>
+  (server ? serverFetch : clientFetch)<DatasetCard>(`/api/v1/modules/${id}/dataset`);
+
+export interface TenantResponse {
+  tenant: Tenant;
+  bodies: Array<{ id: string; dataset: DatasetCard }>;
+}
+
+export const getTenant = (server = true) =>
+  (server ? serverFetch : clientFetch)<TenantResponse>("/api/v1/tenant");
 
 export async function predict(
   id: string,
@@ -80,6 +135,8 @@ export async function explain(
 
 export interface RankedCustomer {
   row_index: number;
+  /** The tenant's shared key space — the same person appears in the fraud book under this id. */
+  customer_id: string;
   state: string;
   score: number;
   label: string;
@@ -92,6 +149,14 @@ export interface RankedResponse {
   n_scored: number;
   data_source: string;
   threshold: number;
+  // Provenance travels with the list, so the table can say what it is showing.
+  tenant?: string;
+  business_unit?: string;
+  dataset?: string;
+  dataset_source?: string;
+  dataset_origin?: string;
+  dataset_rows?: number | null;
+  join_key?: string;
   customers: RankedCustomer[];
 }
 

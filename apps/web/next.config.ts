@@ -37,8 +37,38 @@ if (isProductionBuild) {
 }
 
 
+/**
+ * Which origins may load Next's *dev* resources (HMR socket, dev chunks).
+ *
+ * This is not cosmetic. Next 16 blocks dev resources from any origin not listed here, and when
+ * the HMR socket is refused the dev client never hydrates: the page renders as static HTML, so
+ * every button, file picker and select silently does nothing, with no visible error. That is
+ * exactly what happened behind a preview host — `next dev` was reached at a host it did not
+ * recognise, `/_next/hmr` was answered with "Blocked cross-origin request", and the whole UI
+ * became decorative.
+ *
+ * So the list deliberately covers the hosts this project is actually run behind: localhost, the
+ * container's own loopback, the sandbox preview host (`*.e2b.app`), and Vercel previews. Add
+ * more with `SAROS_DEV_ORIGINS=host-a,host-b` without editing this file. Wildcards are supported
+ * by Next. Production is unaffected: `allowedDevOrigins` is a dev-only setting.
+ */
+const DEV_ORIGINS = [
+  "localhost",
+  "127.0.0.1",
+  "0.0.0.0",
+  "*.local",
+  "*.e2b.app",
+  "*.e2b.dev",
+  "*.vercel.app",
+  ...(process.env.SAROS_DEV_ORIGINS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
+];
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  allowedDevOrigins: DEV_ORIGINS,
   async rewrites() {
     return [
       // Host-based routing: one deploy, many storefronts. Each body can later be given its

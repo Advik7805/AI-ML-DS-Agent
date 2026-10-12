@@ -155,13 +155,114 @@ class ScraperModule(Module):
             summary=(
                 "Turns a URL into structured text the other bodies can consume. Host-allowlisted "
                 "and size-capped so the agent cannot be talked into hammering a site. Mocked by "
-                "default; Firecrawl is the production backend."
+                "default; Firecrawl is the production backend. Data: none — Northwind Labs fetches public "
+                "pages on demand; the mock is labelled everywhere it appears."
             ),
             accent=ACCENT,
             status="live",
             capabilities=["acquisition", "html-to-text", "allowlist", "mockable"],
             routes={"ui": "/scraper", "api": "/api/v1/scraper"},
+            accepts=self.upload_spec().get("accepts", ""),
+            dataset=self.dataset_card(),
             tools=self.tools(),
+        )
+
+    def upload_spec(self) -> dict[str, Any]:
+        return {
+            "kind": "csv",
+            "accepts": (
+                "CSV with a 'url' column (aliases: link, address). Up to 5 URLs are fetched per "
+                "upload through the module's configured backend, and every row says whether the "
+                "result was live or the labelled mock."
+            ),
+            "required": ["url"],
+            "optional": ["label", "note"],
+            "features": [],
+            "label": None,
+            "aliases": {"url": ["link", "address", "href"]},
+            "notes": [],
+        }
+
+    def analyze_upload(self, filename: str, data: bytes, session: Any) -> Any:
+        """Fetch each URL in the file and report what came back, per row."""
+        from core.types import ColumnsReport, MetricsReport, Prediction, UploadAnalysis
+        from core.upload import (
+            UploadRejected,
+            find_column,
+            read_csv_bytes,
+            upload_dataset_card,
+        )
+
+        df = read_csv_bytes(data)
+        url_col = find_column(df, ["url", "link", "address", "href"])
+        if url_col is None:
+            raise UploadRejected(
+                "No URL column found in this file.",
+                expected=["url"],
+                found=[str(c) for c in df.columns],
+                hint="Aliases accepted: link, address, href.",
+            )
+        urls = [str(u).strip() for u in df[url_col].dropna().unique()][:5]
+
+        predictions: list[Prediction] = []
+        live_count = 0
+        for url in urls:
+            try:
+                result = self.tool_render_url(url)
+                live = bool(result.get("live"))
+                live_count += int(live)
+                text = str(result.get("markdown") or "")
+                predictions.append(
+                    Prediction(
+                        module_id=self.id,
+                        score=1.0 if live else 0.5,
+                        label="Fetched live" if live else "Fetched (labelled mock)",
+                        decision=f"{len(text):,} characters of text via {result.get('backend')}",
+                        meta={
+                            "url": url,
+                            "backend": result.get("backend"),
+                            "status": result.get("status"),
+                            "excerpt": " ".join(text.split())[:280],
+                        },
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001 - one bad URL must not fail the file
+                predictions.append(
+                    Prediction(
+                        module_id=self.id,
+                        score=0.0,
+                        label="Fetch failed",
+                        decision=f"{type(exc).__name__}: {exc}",
+                        meta={"url": url},
+                    )
+                )
+
+        return UploadAnalysis(
+            session_id=session.id,
+            module_id=self.id,
+            filename=filename,
+            size_bytes=len(data),
+            kind="csv",
+            rows=len(urls),
+            columns_report=ColumnsReport(expected=["url"], matched=["url"], missing=[], ignored=[]),
+            metrics=MetricsReport(
+                n_samples=len(urls),
+                positive_rate=float(live_count / len(urls)) if urls else 0.0,
+                scores={
+                    "urls_in_file": float(df[url_col].nunique()),
+                    "urls_fetched": float(len(urls)),
+                    "live_fetches": float(live_count),
+                },
+                notes=[
+                    "Live fetches require the acquisition backend to be configured; otherwise each "
+                    "row says 'labelled mock' and no page was actually requested.",
+                    "At most 5 URLs are fetched per upload, so an upload cannot be used to hammer a host.",
+                ],
+            ),
+            predictions=predictions,
+            dataset=upload_dataset_card(self, filename, len(urls), [str(c) for c in df.columns]),
+            notes=["Fetched text can be indexed into the Knowledge body to make it queryable."],
+            extra={"accepts": self.upload_spec()["accepts"]},
         )
 
     def predict(self, payload: dict[str, Any]) -> Prediction:
@@ -263,7 +364,13 @@ class ScraperModule(Module):
                 module_id=self.id,
                 parameters_schema={
                     "type": "object",
-                    "properties": {"url": {"type": "string", "description": "Absolute http(s) URL."}},
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "description": "Absolute http(s) URL.",
+                            "examples": ["https://example.com"],
+                        }
+                    },
                     "required": ["url"],
                 },
             ),
@@ -278,7 +385,11 @@ class ScraperModule(Module):
                 parameters_schema={
                     "type": "object",
                     "properties": {
-                        "query": {"type": "string", "description": "The search query."},
+                        "query": {
+                            "type": "string",
+                            "description": "The search query.",
+                            "examples": ["on-premise AI deployment costs"],
+                        },
                         "max_results": {"type": "integer", "description": "Up to 20; costs 1 credit."},
                         "topic": {
                             "type": "string",
@@ -309,6 +420,7 @@ class ScraperModule(Module):
                             "type": "array",
                             "items": {"type": "string"},
                             "description": "Absolute http(s) URLs, max 5 per call.",
+                            "examples": [["https://example.com"]],
                         }
                     },
                     "required": ["urls"],
@@ -326,7 +438,11 @@ class ScraperModule(Module):
                 parameters_schema={
                     "type": "object",
                     "properties": {
-                        "url": {"type": "string", "description": "Absolute http(s) URL."},
+                        "url": {
+                            "type": "string",
+                            "description": "Absolute http(s) URL.",
+                            "examples": ["https://example.com"],
+                        },
                         "wait_for": {
                             "type": "integer",
                             "description": "Milliseconds to wait for JS to settle. Default 0.",
@@ -381,8 +497,12 @@ class ScraperModule(Module):
                 r["content"] = r["content"][:600]
         return out
 
-    def tool_extract_url(self, urls: list[str]) -> dict[str, Any]:
+    def tool_extract_url(self, urls: list[str] | str) -> dict[str, Any]:
         client = get_client()
+        # `extract_url` is called by hand as often as by the agent, and one URL passed as a bare
+        # string is the usual mistake. Iterating a string yields characters, so normalise first.
+        if isinstance(urls, str):
+            urls = [urls]
         cleaned = [str(u).strip() for u in (urls or []) if str(u).strip()][:5]
         if not cleaned:
             raise ValueError("Missing required features: urls")

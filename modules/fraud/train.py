@@ -38,7 +38,10 @@ class FraudModel:
     metrics: dict[str, float] = field(default_factory=dict)
     trained_at: str = ""
     n_train: int = 0
+    n_rows: int = 0
     base_rate: float = 0.0
+    #: The evaluation this bundle was judged by, carried with the model (see core/artifacts).
+    report: "MetricsReport | None" = None
     notes: list[str] = field(default_factory=list)
     #: Training distribution per feature, retained so incoming batches can be compared against
     #: it. Drift detection is meaningless without a fixed reference frame.
@@ -157,6 +160,7 @@ def train_fraud(*, n: int = 20000, random_state: int = 7) -> tuple[FraudModel, M
         feature_names=list(FEATURES),
         trained_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         n_train=len(X_fit),
+        n_rows=len(df),
         base_rate=float(y.mean()),
         notes=notes,
         # The fit set, not the whole frame: this is the distribution the supervised model saw.
@@ -213,6 +217,7 @@ def train_fraud(*, n: int = 20000, random_state: int = 7) -> tuple[FraudModel, M
         threshold=bundle.threshold,
         notes=notes,
     )
+    bundle.report = report
     return bundle, report
 
 

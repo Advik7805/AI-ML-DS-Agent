@@ -14,6 +14,7 @@ import threading
 from typing import Any
 
 from core.contract import Module
+from core.tenant import prediction_meta, provenance_block
 from core.types import AgentTool, Explanation, FeatureAttribution, MetricsReport, ModuleManifest, Prediction
 
 from .data import FEATURES, TARGET, load_telco
@@ -51,6 +52,7 @@ class ChurnModule(Module):
                 if self._bundle is None:
                     try:
                         self._bundle = ChurnModel.load()
+                        self._report = self._bundle.report
                     except Exception:  # noqa: BLE001 - no artifact yet, or stale pickle
                         self._bundle, self._report = train_churn()
                         self._bundle.save()
@@ -80,14 +82,50 @@ class ChurnModule(Module):
             summary=(
                 "Gradient-boosted churn scoring with SMOTE for class imbalance, isotonic "
                 "calibration, and SHAP explanations. Ranks an entire book of business by "
-                "attrition risk and recommends a retention action per customer."
+                "attrition risk and recommends a retention action per customer. Data: Northwind Connect's "
+                "subscriber billing extract — the public IBM Telco Customer Churn set, 3,333 rows, "
+                "keyed by customer_id and joined to the fraud body."
             ),
             accent=ACCENT,
             status="live",
             capabilities=["classification", "imbalance-handling", "calibration", "shap-xai", "ranking"],
             routes={"ui": "/churn", "api": "/api/v1/churn"},
+            accepts=self.upload_spec().get("accepts", ""),
+            dataset=self.dataset_card(),
             tools=self.tools(),
         )
+
+    def upload_spec(self) -> dict[str, Any]:
+        """What a subscriber extract from your side needs to look like."""
+        from .data import BINARY_FEATURES, NUMERIC_FEATURES, TARGET
+
+        return {
+            "kind": "csv",
+            "accepts": (
+                "CSV, one row per customer. 13 model columns (11 numeric + international_plan, "
+                "voice_mail_plan as 0/1 or yes/no). Optional: state, area_code, *_charge columns, "
+                "and a 'churn' label to score the model against your own outcomes."
+            ),
+            "required": [*NUMERIC_FEATURES, *BINARY_FEATURES],
+            "optional": ["state", "area_code", "customer_id", "total_day_charge", "total_eve_charge",
+                         "total_night_charge", "total_intl_charge", TARGET],
+            "features": [*NUMERIC_FEATURES, *BINARY_FEATURES],
+            "label": TARGET,
+            "aliases": {
+                TARGET: ["churned", "is_churn", "churn_flag"],
+                "number_customer_service_calls": ["service_calls", "custserv_calls"],
+                "international_plan": ["intl_plan"],
+                "voice_mail_plan": ["vmail_plan"],
+                "total_day_minutes": ["day_mins", "total_day_mins"],
+                "total_eve_minutes": ["eve_mins"],
+                "total_night_minutes": ["night_mins"],
+                "total_intl_minutes": ["intl_mins"],
+            },
+            "notes": [
+                "Columns are matched case- and punctuation-insensitively: 'Total Day Minutes' "
+                "works as well as 'total_day_minutes'.",
+            ],
+        }
 
     def predict(self, payload: dict[str, Any]) -> Prediction:
         bundle = self.bundle
@@ -109,12 +147,14 @@ class ChurnModule(Module):
             inputs={k: float(payload[k]) for k in FEATURES if payload.get(k) is not None},
             factors=factors,
             explanation=explanation,
-            meta={
-                "threshold": bundle.threshold,
-                "base_rate": round(bundle.base_rate, 4),
-                "model_source": bundle.source,
-                "trained_at": bundle.trained_at,
-            },
+            meta=prediction_meta(
+                "churn",
+                threshold=bundle.threshold,
+                base_rate=round(bundle.base_rate, 4),
+                model_source=bundle.source,
+                trained_at=bundle.trained_at,
+                customer_id=payload.get("customer_id"),
+            ),
         )
 
     def explain(self, payload: dict[str, Any]) -> Explanation:
@@ -212,6 +252,7 @@ class ChurnModule(Module):
             out.append(
                 {
                     "row_index": int(idx),
+                    "customer_id": str(row.get("customer_id", "")),
                     "state": str(row.get("state", "")),
                     "score": round(score, 4),
                     "label": pred.label,
@@ -222,13 +263,14 @@ class ChurnModule(Module):
             if len(out) >= n:
                 break
 
-        return {
-            "n_returned": len(out),
-            "n_scored": int(len(df)),
-            "data_source": source,
-            "threshold": bundle.threshold,
-            "customers": out,
-        }
+        return provenance_block(
+            self.id,
+            n_returned=len(out),
+            n_scored=int(len(df)),
+            data_source=source,
+            threshold=bundle.threshold,
+            customers=out,
+        )
 
     def tool_get_churn_model_metrics(self) -> dict[str, Any]:
         report = self.evaluate()

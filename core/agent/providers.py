@@ -10,11 +10,20 @@ One protocol, four implementations:
 - ``GeminiProvider`` — Google's REST API, free tier.
 - ``EchoProvider``   — never calls anything; useful for isolating graph bugs.
 
-Selection is by env var, so nothing in the codebase branches on which vendor you picked:
+Selection is by env var, and the **default is ``auto``**: a real model when a key is present, the
+labelled mock when none is. That default matters, because the failure it prevents is invisible.
+A deploy that has ``GROQ_API_KEY`` set but leaves ``SAROS_LLM`` unset used to sit on the mock
+provider while the integrations panel reported Groq as live — the product looked broken and the
+only clue was a badge nobody read.
 
-    SAROS_LLM=mock | groq | gemini | echo
+    SAROS_LLM=auto | groq | gemini | mock | echo      # auto is the default
     GROQ_API_KEY=...
     GEMINI_API_KEY=...
+
+``auto`` resolves in this order: Groq, then Gemini, then mock. An explicit ``SAROS_LLM`` always
+wins, including ``SAROS_LLM=mock``, which is how you demo the deterministic path deliberately
+rather than by accident. If a key is present but rejected by the vendor, the failure surfaces at
+call time as a readable error — it does not silently downgrade to the mock mid-conversation.
 
 Groq and Gemini are called over plain HTTP rather than through their SDKs: two fewer heavy
 dependencies in an image that has to fit in 512 MB on a free tier.
@@ -217,6 +226,83 @@ def _extract_features(user_text: str) -> dict[str, float]:
     return defaults
 
 
+#: How many significant words a passage must share with the question before the mock quotes it.
+_OVERLAP_FLOOR = 2
+
+_STOPWORDS = {
+    "the", "a", "an", "and", "or", "of", "to", "in", "is", "are", "was", "were", "be", "been",
+    "for", "on", "at", "by", "with", "from", "that", "this", "it", "as", "what", "which", "how",
+    "i", "my", "me", "you", "your", "just", "uploaded", "upload", "file", "document", "doc",
+    "about", "does", "do", "did", "say", "says", "tell", "according", "please", "can", "could",
+}
+
+
+def _significant(text: str) -> set[str]:
+    return {
+        w for w in re.findall(r"[a-z0-9]+", text.lower())
+        if w not in _STOPWORDS and len(w) > 2
+    }
+
+
+def _answer_from_session_context(messages: list[Message], question: str) -> str | None:
+    """Answer a question about an uploaded file, extractively, when no LLM is configured.
+
+    Two cases, and both are honest about what they are doing:
+
+    * a passage retrieved from the user's uploaded document matches the question — quote it and
+      cite the filename;
+    * the question is about the upload itself ("what columns did I send?") — read the profile
+      block and report it.
+
+    This never invents: if nothing overlaps, it returns ``None`` and the normal tool-picking path
+    runs, which is the same behaviour as before this function existed.
+    """
+    context = "\n".join(m.content for m in messages if m.role == "system")
+    if "SESSION CONTEXT" not in context:
+        return None
+
+    q = _significant(question)
+
+    # --- case 1: retrieved passages from the upload -------------------------------------
+    passages: list[tuple[str, str, str]] = []
+    for line in context.splitlines():
+        if not line.startswith("- `"):
+            continue
+        m = re.match(r"- `(?P<src>[^`]+)`\s*(?:→|->)\s*(?P<head>[^(]+?)\s*\(relevance (?P<score>[0-9.]+)\):\s*(?P<text>.*)", line)
+        if m:
+            passages.append((m.group("src").strip(), m.group("head").strip(), m.group("text").strip()))
+
+    if passages and q:
+        scored = sorted(
+            passages,
+            key=lambda p: len(q & _significant(f"{p[1]} {p[2]}")),
+            reverse=True,
+        )
+        best_src, best_head, best_text = scored[0]
+        overlap = len(q & _significant(f"{best_head} {best_text}"))
+        if overlap >= _OVERLAP_FLOOR:
+            body = best_text.strip()
+            if body.startswith("..."):
+                body = body[3:].strip()
+            return (
+                f"From your uploaded document `{best_src}` → {best_head}:\n\n{body}\n\n"
+                f"_Quoted directly from your file ({overlap} terms matched). This is the "
+                f"deterministic mock provider answering by extraction — set GROQ_API_KEY for "
+                f"open-ended reasoning over the same passage._"
+            )
+
+    # --- case 2: a question about the upload itself -------------------------------------
+    if re.search(r"\b(column|columns|row|rows|schema|what did i|my (?:file|data|upload)|\bhow many)\b", question, re.I):
+        profile = [ln.strip() for ln in context.splitlines() if ln.strip().startswith("- `")]
+        if profile:
+            return (
+                "Here is what this session has uploaded, from the platform's own record:\n\n"
+                + "\n".join(profile)
+                + "\n\n_Read from the session store; nothing here is generated._"
+            )
+    return None
+
+
 class MockProvider:
     """A deterministic policy standing in for the language model.
 
@@ -234,6 +320,15 @@ class MockProvider:
         # Turn 1: decide whether a tool is needed.
         if not any(m.role == "tool" for m in messages):
             user_text = next((m.content for m in reversed(messages) if m.role == "user"), "")
+
+            # A question about a file the user just uploaded is answerable from the session
+            # context the API supplies — and it must be, because the zero-key deployment is the
+            # default one. Without this the mock replied "tell me which body", which is exactly
+            # the "I uploaded it and nothing happened" experience this work exists to fix.
+            from_context = _answer_from_session_context(messages, user_text)
+            if from_context:
+                return Message(role="assistant", content=from_context)
+
             tool = _pick_tool(user_text, available)
             if tool is None:
                 return Message(
@@ -241,8 +336,9 @@ class MockProvider:
                     content=(
                         "I can score churn risk, rank an at-risk portfolio, report model metrics, "
                         "search the knowledge base, score a transaction for fraud, or scrape a URL. "
-                        "Tell me which. (Running on the mock provider — set SAROS_LLM=groq or "
-                        "gemini for real reasoning.)"
+                        "Tell me which. (Running on the deterministic mock provider — no LLM key "
+                        "is configured. Set GROQ_API_KEY or GEMINI_API_KEY and the hub switches "
+                        "to a real model on the next request.)"
                     ),
                 )
             args = self._args_for(tool, user_text, by_name[tool])
@@ -804,16 +900,46 @@ def _summarise(tool_output: str) -> str:
 # --- factory -----------------------------------------------------------------
 
 
+def resolve_provider_name(requested: str | None = None) -> str:
+    """Which provider ``auto`` (or an explicit name) resolves to, without constructing it.
+
+    Split out from :func:`get_provider` so the hub, the badge and the tests all answer
+    "which model is actually answering?" from one place. Two implementations of this rule is
+    exactly how the old deploy ended up advertising Groq while the chat ran on the mock.
+    """
+    name = (requested or os.getenv("SAROS_LLM", "auto")).strip().lower()
+    if name == "auto":
+        if os.getenv("GROQ_API_KEY", "").strip():
+            return "groq"
+        if os.getenv("GEMINI_API_KEY", "").strip():
+            return "gemini"
+        return "mock"
+    if name in ("groq", "gemini", "mock", "echo"):
+        return name
+    # An unknown value is a typo, not a request for silence: fall back to auto's rule.
+    return resolve_provider_name("auto")
+
+
 def get_provider(name: str | None = None) -> Provider:
     """Resolve the provider from env. Never raises for a missing key — falls back to mock.
 
-    A student deploying on a free tier will frequently have no key configured, and the hub
-    should still be a working product rather than a 500.
+    Default is ``auto``: ``GROQ_API_KEY`` -> Groq, else ``GEMINI_API_KEY`` -> Gemini, else the
+    labelled mock. A student deploying on a free tier will frequently have no key configured,
+    and the hub should still be a working product rather than a 500 — but a key that *is*
+    configured must never be ignored, which is what a hardcoded "mock" default did.
+
+    An explicitly named provider that cannot be constructed (``SAROS_LLM=groq`` with no key)
+    degrades to the mock rather than raising, so a bad env var cannot take the hub down.
     """
-    name = (name or os.getenv("SAROS_LLM", "mock")).strip().lower()
-    if name in ("groq", "gemini"):
+    name = resolve_provider_name(name)
+    if name == "groq":
         try:
-            return GroqProvider() if name == "groq" else GeminiProvider()
+            return GroqProvider()
+        except RuntimeError:
+            return MockProvider()
+    if name == "gemini":
+        try:
+            return GeminiProvider()
         except RuntimeError:
             return MockProvider()
     if name == "echo":

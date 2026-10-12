@@ -12,6 +12,7 @@ import threading
 from typing import Any, AsyncIterator
 
 from core.contract import Module
+from core.tenant import prediction_meta
 from core.types import AgentTool, Explanation, FeatureAttribution, MetricsReport, ModuleManifest, Prediction
 
 import pandas as pd
@@ -49,6 +50,7 @@ class FraudModule(Module):
                 if self._bundle is None:
                     try:
                         self._bundle = FraudModel.load()
+                        self._report = self._bundle.report
                     except Exception:  # noqa: BLE001 - no artifact yet
                         self._bundle, self._report = train_fraud()
                         self._bundle.save()
@@ -76,14 +78,49 @@ class FraudModule(Module):
             summary=(
                 "Streaming transaction scoring. A supervised gradient-boosted model for known "
                 "patterns plus an isolation forest for novel ones, combined by max so unseen "
-                "fraud still trips the alarm. Live feed included."
+                "fraud still trips the alarm. Live feed included. Data: Northwind Pay's card authorisation "
+                "ledger, 20,000 generated transactions at a 1.2% fraud rate, sharing customer_id "
+                "with the churn book."
             ),
             accent=ACCENT,
             status="live",
             capabilities=["classification", "anomaly-detection", "imbalance-handling", "streaming", "shap-xai"],
             routes={"ui": "/fraud", "api": "/api/v1/fraud"},
+            accepts=self.upload_spec().get("accepts", ""),
+            dataset=self.dataset_card(),
             tools=self.tools(),
         )
+
+    def upload_spec(self) -> dict[str, Any]:
+        """A batch of authorisations from your own ledger."""
+        from .data import FEATURES, TARGET
+
+        return {
+            "kind": "csv",
+            "accepts": (
+                "CSV, one row per authorisation, with the 10 model columns (amount, hour_of_day, "
+                "distance_from_home_km, txn_count_1h, distinct_merchants_24h, card_age_days, "
+                "avg_amount_30d, is_night, is_foreign, pin_used). Include an 'is_fraud' label to "
+                "get precision/recall against your own confirmed cases."
+            ),
+            "required": list(FEATURES),
+            "optional": ["auth_id", "customer_id", "merchant", "currency", TARGET],
+            "features": list(FEATURES),
+            "label": TARGET,
+            "aliases": {
+                TARGET: ["fraud", "is_fraudulent", "confirmed_fraud", "label"],
+                "distance_from_home_km": ["distance_km", "distance_from_home"],
+                "txn_count_1h": ["transactions_last_hour", "velocity_1h"],
+                "distinct_merchants_24h": ["merchants_24h"],
+                "card_age_days": ["card_age"],
+                "avg_amount_30d": ["avg_amount"],
+            },
+            "notes": [
+                "The upload path scores with the supervised model. The isolation-forest half is "
+                "fitted on the tenant's training distribution, so it would mark an unfamiliar "
+                "batch as novel by construction — which is a property of your data, not a verdict.",
+            ],
+        }
 
     def predict(self, payload: dict[str, Any]) -> Prediction:
         bundle = self.bundle
@@ -99,13 +136,14 @@ class FraudModule(Module):
             decision=decision,
             inputs={k: float(payload[k]) for k in FEATURES if payload.get(k) is not None},
             factors=[],
-            meta={
-                "threshold": bundle.threshold,
-                "supervised_score": round(float(sup), 4),
-                "unsupervised_score": round(float(unsup), 4),
-                "decisive_model": which,
-                "base_rate": round(bundle.base_rate, 5),
-            },
+            meta=prediction_meta(
+                "fraud",
+                threshold=bundle.threshold,
+                supervised_score=round(float(sup), 4),
+                unsupervised_score=round(float(unsup), 4),
+                decisive_model=which,
+                base_rate=round(bundle.base_rate, 5),
+            ),
         )
 
     def explain(self, payload: dict[str, Any]) -> Explanation:
@@ -259,6 +297,8 @@ class FraudModule(Module):
             combined, sup, unsup = bundle.predict_proba(payload)
             rows.append(
                 {
+                    "auth_id": str(row.get("auth_id", "")),
+                    "customer_id": str(row.get("customer_id", "")),
                     "amount": float(row["amount"]),
                     "risk": round(float(combined), 4),
                     "flagged": bool(combined >= bundle.threshold),
@@ -270,20 +310,23 @@ class FraudModule(Module):
         caught = sum(1 for r in rows if r["flagged"] and r["actual_fraud"])
         missed = sum(1 for r in rows if not r["flagged"] and r["actual_fraud"])
         false_alarms = sum(1 for r in rows if r["flagged"] and not r["actual_fraud"])
-        return {
-            "n_scored": len(rows),
-            "n_flagged": len(flagged),
-            "true_positives": caught,
-            "false_positives": false_alarms,
-            "missed_fraud": missed,
-            "threshold": bundle.threshold,
-            "enriched": True,
-            "enrichment_note": (
+        from core.tenant import provenance_block
+
+        return provenance_block(
+            self.id,
+            n_scored=len(rows),
+            n_flagged=len(flagged),
+            true_positives=caught,
+            false_positives=false_alarms,
+            missed_fraud=missed,
+            threshold=bundle.threshold,
+            enriched=True,
+            enrichment_note=(
                 "Sample is fraud-enriched so the summary is informative; real traffic is ~1% "
                 "fraudulent."
             ),
-            "top_flagged": sorted(flagged, key=lambda r: -r["risk"])[:5],
-        }
+            top_flagged=sorted(flagged, key=lambda r: -r["risk"])[:5],
+        )
 
     def tool_check_fraud_drift(self, n: int = 400) -> dict[str, Any]:
         """Compare a fresh batch of transactions against the distribution the model trained on.

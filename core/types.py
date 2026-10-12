@@ -109,6 +109,44 @@ class AgentTool(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
 
 
+class DatasetCard(BaseModel):
+    """Where a body's numbers come from, and whose they are.
+
+    Every body carries one. It exists because "which company, which file, which rows, which
+    key?" is the first question a reviewer asks and the first thing an unexplained dashboard
+    fails to answer. A model that cannot say what it was trained on should not be trusted with
+    a decision, so the answer is a required field rather than a docstring.
+    """
+
+    module_id: str = ""
+    company: str = ""
+    company_note: str = ""
+    business_unit: str = ""
+    dataset: str = ""
+    grain: str = Field(default="", description="What one row is.")
+    key: str = Field(default="", description="Primary/join key, so cross-body joins are possible.")
+    target: str = Field(default="", description="What the model predicts, in business words.")
+    period: str = ""
+    origin: Literal["public-dataset", "generated", "corpus", "uploaded", "none"] = "none"
+    origin_detail: str = Field(default="", description="Exactly what the numbers are. Never vague.")
+    origin_url: str = ""
+    file: str = ""
+    rows: int | None = Field(default=None, description="Rows as shipped.")
+    observed_rows: int | None = Field(default=None, description="Rows the body actually read, once it has.")
+    observed_source: str = Field(default="", description="Real/synthetic marker reported by the loader.")
+    observed_basis: str = Field(
+        default="",
+        description=(
+            "What observed_rows counts. A loaded artifact can only report the split it was "
+            "trained on, and calling that 'rows read' would overstate what the card knows."
+        ),
+    )
+    system_of_record: str = Field(default="", description="Where this would live in production.")
+    why: str = ""
+    connect: str = Field(default="", description="How this body links to the others.")
+    caveats: list[str] = Field(default_factory=list)
+
+
 class ModuleManifest(BaseModel):
     """What the hub needs to render a body's tile and route to it."""
 
@@ -121,6 +159,13 @@ class ModuleManifest(BaseModel):
     capabilities: list[str] = Field(default_factory=list)
     routes: dict[str, str] = Field(default_factory=dict, description="e.g. {'ui': '/churn', 'api': '/api/v1/churn'}")
     tools: list[AgentTool] = Field(default_factory=list)
+    accepts: str = Field(
+        default="",
+        description="What file this body accepts in the upload studio, in one sentence.",
+    )
+    dataset: "DatasetCard | None" = Field(
+        default=None, description="Provenance for this body's data. Rendered on the body page."
+    )
 
 
 class MetricsReport(BaseModel):
@@ -138,3 +183,42 @@ class MetricsReport(BaseModel):
     #: How the grouping was defined. Required whenever ``groups`` is non-empty, so a
     #: breakdown can never be reported without saying what it was sliced by.
     group_basis: str = ""
+
+
+class ColumnsReport(BaseModel):
+    """How an uploaded file's columns mapped onto a body's expected schema.
+
+    Reported instead of a bare pass/fail because "which of my columns did you actually use?" is
+    the first question anyone asks after uploading a file, and guessing the answer is how a user
+    ends up trusting a score computed from the wrong column.
+    """
+
+    expected: list[str] = Field(default_factory=list)
+    matched: list[str] = Field(default_factory=list)
+    missing: list[str] = Field(default_factory=list)
+    ignored: list[str] = Field(default_factory=list, description="Present in the file, unused by the model.")
+    recognised_optional: list[str] = Field(default_factory=list)
+
+
+class UploadAnalysis(BaseModel):
+    """The result of scoring one uploaded file — the same shapes the UI already renders.
+
+    ``metrics`` and ``predictions`` are the platform's existing ``MetricsReport`` and
+    ``Prediction``, so an uploaded-file panel needs no bespoke rendering path that could drift
+    away from the shipped-data one.
+    """
+
+    session_id: str
+    module_id: str
+    filename: str
+    size_bytes: int
+    kind: str = "unknown"
+    rows: int | None = None
+    columns_report: ColumnsReport = Field(default_factory=ColumnsReport)
+    threshold: float = 0.5
+    metrics: MetricsReport | None = None
+    predictions: list[Prediction] = Field(default_factory=list)
+    dataset: DatasetCard | None = None
+    preview: list[dict[str, Any]] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+    extra: dict[str, Any] = Field(default_factory=dict)

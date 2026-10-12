@@ -1,4 +1,6 @@
-# Fraud Protocol
+# Fraud Protocol — Northwind Pay
+
+Owner: Payment Risk, Northwind Pay · Applies to every card authorisation
 
 ## Scoring
 Every transaction is scored before settlement. Above the operating threshold the transaction

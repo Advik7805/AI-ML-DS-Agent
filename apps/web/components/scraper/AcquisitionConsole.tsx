@@ -117,8 +117,8 @@ export function AcquisitionConsole() {
 
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_300px]">
-      <div className="rounded-2xl border border-[#e7e0d5] bg-white p-6 shadow-sm">
-        <div className="flex gap-1 rounded-xl bg-[#f5f5f4] p-1">
+      <div className="rounded-2xl border border-line bg-void-3 p-6 shadow-sm">
+        <div className="flex gap-1 rounded-xl bg-white/5 p-1">
           {([
             ["fetch", "Plain GET"],
             ["search", "Web search"],
@@ -128,7 +128,7 @@ export function AcquisitionConsole() {
               key={id}
               onClick={() => { setTab(id); setError(null); }}
               className={`flex-1 rounded-lg px-3 py-2 text-[12.5px] font-medium transition ${
-                tab === id ? "bg-white shadow-sm text-[#1c1917]" : "text-[#78716c]"
+                tab === id ? "bg-void-3 shadow-sm text-ink" : "text-ink-dim"
               }`}
             >
               {label}
@@ -149,7 +149,7 @@ export function AcquisitionConsole() {
             value={tab === "search" ? query : url}
             onChange={(e) => (tab === "search" ? setQuery(e.target.value) : setUrl(e.target.value))}
             placeholder={tab === "search" ? "Search the web…" : "https://…"}
-            className="flex-1 rounded-xl border border-[#e7e0d5] px-3.5 py-2.5 font-mono text-[12.5px] outline-none focus:border-[#ea580c]"
+            className="flex-1 rounded-xl border border-line px-3.5 py-2.5 font-mono text-[12.5px] outline-none focus:border-[#ea580c]"
           />
           <button
             type="submit"
@@ -162,13 +162,13 @@ export function AcquisitionConsole() {
         </form>
 
         {tab === "extract" && (
-          <p className="mt-2 text-[11px] text-[#a8a29e]">
+          <p className="mt-2 text-[11px] text-ink-faint">
             Separate multiple URLs with commas. Max 5 per call — billed at 1 credit per 5.
           </p>
         )}
 
         {error && (
-          <div className="mt-4 rounded-xl border border-[#fecaca] bg-[#fef2f2] p-4 text-[12.5px] text-[#991b1b]">
+          <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-[12.5px] text-red-300">
             {error}
           </div>
         )}
@@ -182,7 +182,7 @@ export function AcquisitionConsole() {
             meta={`${scrape.status || "—"} · ${(scrape.bytes ?? 0).toLocaleString()} bytes`}
           >
             {scrape.markdown && (
-              <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded-lg bg-[#fafaf9] p-3 font-mono text-[11px] leading-relaxed text-[#44403c]">
+              <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded-lg bg-white/5 p-3 font-mono text-[11px] leading-relaxed text-ink-dim">
                 {scrape.markdown}
               </pre>
             )}
@@ -197,7 +197,7 @@ export function AcquisitionConsole() {
             error={search.error}
           >
             {search.answer && (
-              <p className="rounded-lg bg-[#fafaf9] p-3 text-[12.5px] leading-relaxed text-[#44403c]">
+              <p className="rounded-lg bg-white/5 p-3 text-[12.5px] leading-relaxed text-ink-dim">
                 {search.answer}
               </p>
             )}
@@ -211,21 +211,21 @@ export function AcquisitionConsole() {
                   initial={{ opacity: 0, y: 4 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.04 }}
-                  className="block rounded-xl border border-[#f5f5f4] p-3.5 transition hover:border-[#ea580c]/40"
+                  className="block rounded-xl border border-white/5 p-3.5 transition hover:border-[#ea580c]/40"
                 >
                   <div className="flex items-baseline justify-between gap-2">
                     <span className="text-[13px] font-medium">{h.title}</span>
-                    <span className="font-mono text-[10.5px] tabular-nums text-[#a8a29e]">
+                    <span className="font-mono text-[10.5px] tabular-nums text-ink-faint">
                       {h.score.toFixed(2)}
                     </span>
                   </div>
-                  <div className="mt-0.5 truncate font-mono text-[10.5px] text-[#a8a29e]">{h.url}</div>
-                  <p className="mt-1.5 text-[12px] leading-relaxed text-[#57534e]">{h.content}</p>
+                  <div className="mt-0.5 truncate font-mono text-[10.5px] text-ink-faint">{h.url}</div>
+                  <p className="mt-1.5 text-[12px] leading-relaxed text-ink-dim">{h.content}</p>
                 </motion.a>
               ))}
             </div>
             {search.note && (
-              <p className="mt-3 text-[11px] italic leading-relaxed text-[#a8a29e]">{search.note}</p>
+              <p className="mt-3 text-[11px] italic leading-relaxed text-ink-faint">{search.note}</p>
             )}
           </Result>
         )}
@@ -234,9 +234,9 @@ export function AcquisitionConsole() {
           <Result title={`${extract.urls.length} URL(s)`} backend={extract.backend} live={extract.live} error={extract.error}>
             <div className="space-y-3">
               {extract.results.map((r) => (
-                <div key={r.url} className="rounded-xl border border-[#f5f5f4] p-3.5">
-                  <div className="truncate font-mono text-[10.5px] text-[#a8a29e]">{r.url}</div>
-                  <p className="mt-1.5 whitespace-pre-wrap text-[12px] leading-relaxed text-[#57534e]">
+                <div key={r.url} className="rounded-xl border border-white/5 p-3.5">
+                  <div className="truncate font-mono text-[10.5px] text-ink-faint">{r.url}</div>
+                  <p className="mt-1.5 whitespace-pre-wrap text-[12px] leading-relaxed text-ink-dim">
                     {r.raw_content}
                   </p>
                 </div>
@@ -273,11 +273,11 @@ export function AcquisitionConsole() {
           </>
         )}
 
-        <div className="rounded-2xl border border-[#fde68a] bg-[#fffbeb] p-5">
-          <div className="text-[12.5px] font-medium text-[#92400e]">
+        <div className="rounded-2xl border border-churn/30 bg-churn/10 p-5">
+          <div className="text-[12.5px] font-medium text-churn">
             Both backends gate live calls behind an explicit flag
           </div>
-          <p className="mt-1.5 text-[11.5px] leading-relaxed text-[#a16207]">
+          <p className="mt-1.5 text-[11.5px] leading-relaxed text-churn">
             A key sitting in a local <code className="font-mono">.env</code> is not enough. Without
             the flag every result is deterministic mock data, labelled as such here and in the API
             payload, so a demo cannot quietly make billable calls or pass placeholders off as
@@ -305,24 +305,24 @@ function Result({
         <span
           className="rounded-md px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider"
           style={{
-            background: live ? "#f0fdf4" : "#fef3c7",
-            color: live ? "#166534" : "#92400e",
+            background: live ? "#f0fdf4" : "rgba(245,158,11,0.14)",
+            color: live ? "#6ee7b7" : "var(--color-churn)",
           }}
         >
           {backend} · {live ? "live" : "mock"}
         </span>
-        {meta && <span className="font-mono text-[10.5px] text-[#a8a29e]">{meta}</span>}
+        {meta && <span className="font-mono text-[10.5px] text-ink-faint">{meta}</span>}
       </div>
-      <div className="mt-1 truncate font-mono text-[11px] text-[#78716c]">{title}</div>
+      <div className="mt-1 truncate font-mono text-[11px] text-ink-dim">{title}</div>
 
       {!live && (
-        <div className="mt-2 rounded-lg border border-[#fde68a] bg-[#fffbeb] px-3 py-2 text-[11.5px] text-[#92400e]">
+        <div className="mt-2 rounded-lg border border-churn/30 bg-churn/10 px-3 py-2 text-[11.5px] text-churn">
           Simulated output — no network call was made. Do not cite or act on these values.
         </div>
       )}
 
       {error ? (
-        <div className="mt-2 rounded-lg border border-[#fecaca] bg-[#fef2f2] p-3 text-[12.5px] text-[#991b1b]">
+        <div className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-[12.5px] text-red-300">
           {error}
         </div>
       ) : (
@@ -342,22 +342,22 @@ function Backend({
   hintTail?: string;
 }) {
   return (
-    <div className="rounded-2xl border border-[#e7e0d5] bg-white p-5 shadow-sm">
+    <div className="rounded-2xl border border-line bg-void-3 p-5 shadow-sm">
       <div className="flex items-center justify-between">
         <span className="text-[13px] font-semibold">{name}</span>
         <span
           className="rounded-md px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider"
           style={{
-            background: live ? "#f0fdf4" : "#f5f5f4",
-            color: live ? "#166534" : "#78716c",
+            background: live ? "#f0fdf4" : "rgba(255,255,255,0.06)",
+            color: live ? "#6ee7b7" : "var(--color-ink-dim)",
           }}
         >
           {live ? "live" : "mock"}
         </span>
       </div>
-      <p className="mt-1.5 text-[11.5px] leading-relaxed text-[#57534e]">{detail}</p>
+      <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-dim">{detail}</p>
       {hint && (
-        <p className="mt-2 border-t border-[#f5f5f4] pt-2 text-[11px] leading-relaxed text-[#a8a29e]">
+        <p className="mt-2 border-t border-white/5 pt-2 text-[11px] leading-relaxed text-ink-faint">
           {hint}
           {hintTail}
         </p>

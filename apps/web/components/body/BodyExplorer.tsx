@@ -50,6 +50,9 @@ export function BodyExplorer({ moduleId, accent }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [raw, setRaw] = useState<string>("");
+  // Elapsed seconds for the running tool. The first call on a cold instance can train a model,
+  // and a button that says "Running…" for 14 seconds with no movement reads as a hang.
+  const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
     clientFetch<ModuleManifest>(`/api/v1/modules/${moduleId}`)
@@ -85,6 +88,8 @@ export function BodyExplorer({ moduleId, accent }: Props) {
   const run = useCallback(async () => {
     if (!tool) return;
     setBusy(true);
+    setElapsed(0);
+    const tick = setInterval(() => setElapsed((e) => e + 0.1), 100);
     setError(null);
     setResult(null);
     setPrediction(null);
@@ -102,8 +107,12 @@ export function BodyExplorer({ moduleId, accent }: Props) {
       if (r && typeof r.score === "number" && typeof r.label === "string") {
         setPrediction(r as unknown as Prediction);
       }
+      // Only bodies that actually ship an explainer are asked for an explanation. Pricing and
+      // the scraper do not, and the request used to be sent anyway and 422 — noise in the API log,
+      // and a round trip that can never succeed.
       const feats = predictionFeatures(r);
-      if (feats) {
+      const explains = (manifest?.capabilities ?? []).some((c) => c.includes("shap") || c === "xai");
+      if (feats && explains) {
         try {
           setExplanation(await clientFetch<Explanation>(`/api/v1/modules/${moduleId}/explain`, {
             method: "POST",
@@ -111,15 +120,16 @@ export function BodyExplorer({ moduleId, accent }: Props) {
             body: JSON.stringify({ features: feats }),
           }));
         } catch {
-          /* not every body explains */
+          /* an explainer that is present but unhappy must not break the score */
         }
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
+      clearInterval(tick);
       setBusy(false);
     }
-  }, [tool, args, moduleId]);
+  }, [tool, args, moduleId, manifest]);
 
   const props = (tool?.parameters_schema?.properties ?? {}) as Json;
   const required = new Set((tool?.parameters_schema?.required ?? []) as string[]);
@@ -129,7 +139,7 @@ export function BodyExplorer({ moduleId, accent }: Props) {
       {/* --- summary + metrics ------------------------------------------- */}
       {manifest && (
         <section id="model" className="scroll-mt-24 pb-8">
-          <p className="max-w-3xl text-[15px] leading-relaxed text-[#57534e]">{manifest.summary}</p>
+          <p className="max-w-3xl text-[15px] leading-relaxed text-ink-dim">{manifest.summary}</p>
 
           <div className="mt-5 flex flex-wrap gap-2">
             {manifest.capabilities.map((c) => (
@@ -151,11 +161,11 @@ export function BodyExplorer({ moduleId, accent }: Props) {
                   <div
                     key={k}
                     className={`rounded-2xl border p-4 shadow-sm ${
-                      i === 0 ? "bg-white" : "border-[#e7e0d5] bg-white"
+                      i === 0 ? "bg-void-3" : "border-line bg-void-3"
                     }`}
                     style={i === 0 ? { borderColor: `${accent}88` } : undefined}
                   >
-                    <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#a8a29e]">
+                    <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-ink-faint">
                       {k.replace(/_/g, " ")}
                     </div>
                     <div className="mt-1.5 text-2xl font-semibold tabular-nums tracking-tight">
@@ -167,16 +177,16 @@ export function BodyExplorer({ moduleId, accent }: Props) {
           )}
 
           {metrics && (metrics.groups ? Object.keys(metrics.groups).length > 0 : false) && (
-            <div className="mt-3 rounded-2xl border border-[#e7e0d5] bg-white p-5 shadow-sm">
+            <div className="mt-3 rounded-2xl border border-line bg-void-3 p-5 shadow-sm">
               <div className="text-[13px] font-semibold">Group breakdown</div>
-              <div className="mt-1 font-mono text-[10.5px] text-[#a8a29e]">{metrics.group_basis}</div>
+              <div className="mt-1 font-mono text-[10.5px] text-ink-faint">{metrics.group_basis}</div>
               <table className="mt-3 w-full text-left text-[12px]">
                 <tbody>
                   {Object.entries(metrics.groups).map(([g, vals]) => (
-                    <tr key={g} className="border-b border-[#f5f5f4] last:border-0">
+                    <tr key={g} className="border-b border-white/5 last:border-0">
                       <td className="py-1.5 font-mono text-[11.5px]">{g}</td>
                       {Object.entries(vals).map(([k, v]) => (
-                        <td key={k} className="py-1.5 text-[11.5px] tabular-nums text-[#57534e]">
+                        <td key={k} className="py-1.5 text-[11.5px] tabular-nums text-ink-dim">
                           {k.replace(/_/g, " ")} {(v * 100).toFixed(1)}%
                         </td>
                       ))}
@@ -188,13 +198,13 @@ export function BodyExplorer({ moduleId, accent }: Props) {
           )}
 
           {metrics && (
-            <details className="mt-3 rounded-2xl border border-[#e7e0d5] bg-white p-5 shadow-sm">
-              <summary className="cursor-pointer font-mono text-[11px] uppercase tracking-[0.14em] text-[#a8a29e] hover:text-[#57534e]">
+            <details className="mt-3 rounded-2xl border border-line bg-void-3 p-5 shadow-sm">
+              <summary className="cursor-pointer font-mono text-[11px] uppercase tracking-[0.14em] text-ink-faint hover:text-ink-dim">
                 Methodology notes ({metrics.notes.length})
               </summary>
-              <ul className="mt-3 space-y-2 border-t border-[#f5f5f4] pt-3">
+              <ul className="mt-3 space-y-2 border-t border-white/5 pt-3">
                 {metrics.notes.map((n) => (
-                  <li key={n} className="text-[12px] leading-relaxed text-[#57534e]">
+                  <li key={n} className="text-[12px] leading-relaxed text-ink-dim">
                     <span className="mr-2" style={{ color: accent }}>—</span>
                     {n}
                   </li>
@@ -204,8 +214,9 @@ export function BodyExplorer({ moduleId, accent }: Props) {
           )}
 
           {metricsError && (
-            <div className="mt-3 rounded-xl border border-[#fde68a] bg-[#fffbeb] p-4 text-[12.5px] text-[#78350f]">
-              Model card unavailable: {metricsError}. The console below still works.
+            <div className="mt-3 rounded-xl border border-churn/30 bg-churn/10 p-4 text-[12.5px] leading-relaxed text-ink">
+              Model card unavailable: {metricsError}. The console below still works — and if the
+              API is asleep, it wakes on its own after ~10s of retrying.
             </div>
           )}
         </section>
@@ -214,25 +225,35 @@ export function BodyExplorer({ moduleId, accent }: Props) {
       {/* --- console ------------------------------------------------------ */}
       <section id="console" className="scroll-mt-24">
         <div className="grid gap-5 lg:grid-cols-[380px_minmax(0,1fr)]">
-          <div className="rounded-2xl border border-[#e7e0d5] bg-white p-5 shadow-sm">
-            <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-[#a8a29e]">Tool</div>
-            <select
-              value={toolName}
-              onChange={(e) => {
-                const t = manifest?.tools.find((x) => x.name === e.target.value);
-                setToolName(e.target.value);
-                if (t) setArgs(defaultArgs(t));
-              }}
-              className="mt-1.5 w-full rounded-md border border-[#e7e0d5] bg-white px-2.5 py-1.5 font-mono text-[12px]"
-            >
-              {(manifest?.tools ?? []).map((t) => (
-                <option key={t.name} value={t.name}>
-                  {t.name}
-                </option>
-              ))}
-            </select>
+          <div className="rounded-2xl border border-line bg-void-3 p-5 shadow-sm">
+            <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-ink-faint">Tool</div>
+            {manifest === null ? (
+              <div className="mt-1.5 w-full rounded-md border border-line bg-void-3 px-2.5 py-1.5 font-mono text-[12px] text-ink-faint">
+                loading tools…
+              </div>
+            ) : manifest.tools.length === 0 ? (
+              <div className="mt-1.5 w-full rounded-md border border-line bg-void-3 px-2.5 py-1.5 font-mono text-[12px] text-ink-faint">
+                no tools registered for this body
+              </div>
+            ) : (
+              <select
+                value={toolName}
+                onChange={(e) => {
+                  const t = manifest.tools.find((x) => x.name === e.target.value);
+                  setToolName(e.target.value);
+                  if (t) setArgs(defaultArgs(t));
+                }}
+                className="mt-1.5 w-full rounded-md border border-line bg-void-3 px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none focus:border-hub/60"
+              >
+                {manifest.tools.map((t) => (
+                  <option key={t.name} value={t.name} className="bg-void-3 text-ink">
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            )}
 
-            {tool && <p className="mt-2.5 text-[11.5px] leading-relaxed text-[#78716c]">{tool.description}</p>}
+            {tool && <p className="mt-2.5 text-[11.5px] leading-relaxed text-ink-dim">{tool.description}</p>}
 
             <div className="mt-4 max-h-[46vh] space-y-2.5 overflow-y-auto pr-1">
               {Object.entries(props).map(([k, v]) => {
@@ -241,7 +262,7 @@ export function BodyExplorer({ moduleId, accent }: Props) {
                 const numeric = types.includes("number") || types.includes("integer");
                 return (
                   <div key={k} className="flex items-center gap-3">
-                    <label className="w-40 shrink-0 truncate font-mono text-[10.5px] text-[#57534e]">
+                    <label className="w-40 shrink-0 truncate font-mono text-[10.5px] text-ink-dim">
                       {k}
                       {required.has(k) && <span style={{ color: accent }}> *</span>}
                     </label>
@@ -250,7 +271,7 @@ export function BodyExplorer({ moduleId, accent }: Props) {
                       onChange={(e) =>
                         setArgs((a) => ({ ...a, [k]: numeric && e.target.value !== "" ? Number(e.target.value) : e.target.value }))
                       }
-                      className="flex-1 rounded-md border border-[#e7e0d5] px-2 py-1 font-mono text-[11.5px]"
+                      className="flex-1 rounded-md border border-line px-2 py-1 font-mono text-[11.5px]"
                     />
                   </div>
                 );
@@ -263,23 +284,29 @@ export function BodyExplorer({ moduleId, accent }: Props) {
               className="mt-4 w-full rounded-lg py-2 text-[13px] font-medium text-white transition disabled:opacity-50"
               style={{ background: accent }}
             >
-              {busy ? "Running…" : "Run tool"}
+              {busy ? `Running… ${elapsed.toFixed(1)}s` : "Run tool"}
             </button>
-            <p className="mt-2 text-center font-mono text-[10px] text-[#a8a29e]">
+            <p className="mt-2 text-center font-mono text-[10px] text-ink-faint">
               POST /api/v1/agent/tools/{toolName}
             </p>
+            {busy && elapsed > 4 && (
+              <p className="mt-2 text-center text-[10.5px] leading-relaxed text-ink-faint">
+                Still working. A cold instance trains the body&rsquo;s model on first use — the
+                startup warm-up normally has it ready before you are.
+              </p>
+            )}
           </div>
 
           <div className="space-y-4">
             {error && (
-              <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-[12.5px] text-red-700">
+              <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-[12.5px] text-red-300">
                 {error}
               </div>
             )}
 
             {prediction && (
-              <div className="rounded-2xl border border-[#e7e0d5] bg-white p-5 shadow-sm">
-                <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-[#a8a29e]">Result</div>
+              <div className="rounded-2xl border border-line bg-void-3 p-5 shadow-sm">
+                <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-ink-faint">Result</div>
                 <div className="mt-2 flex items-end gap-3">
                   <span
                     className="text-4xl font-semibold tabular-nums tracking-tight"
@@ -289,7 +316,7 @@ export function BodyExplorer({ moduleId, accent }: Props) {
                   </span>
                   <span className="pb-1 text-[13px] font-medium">{prediction.label}</span>
                 </div>
-                <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#f5f5f4]">
+                <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/5">
                   <motion.div
                     className="h-full rounded-full"
                     style={{ background: riskColor(prediction.score, accent) }}
@@ -297,24 +324,24 @@ export function BodyExplorer({ moduleId, accent }: Props) {
                     transition={{ type: "spring", stiffness: 140, damping: 20 }}
                   />
                 </div>
-                <div className="mt-4 rounded-xl bg-[#fafaf9] p-3.5 ring-1 ring-[#e7e0d5]">
-                  <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-[#a8a29e]">
+                <div className="mt-4 rounded-xl bg-white/5 p-3.5 ring-1 ring-line">
+                  <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-ink-faint">
                     Recommended
                   </div>
-                  <p className="mt-1 text-[12.5px] leading-relaxed text-[#44403c]">{prediction.decision}</p>
+                  <p className="mt-1 text-[12.5px] leading-relaxed text-ink-dim">{prediction.decision}</p>
                 </div>
               </div>
             )}
 
             {explanation && explanation.attributions.length > 0 && (
-              <div className="rounded-2xl border border-[#e7e0d5] bg-white p-5 shadow-sm">
+              <div className="rounded-2xl border border-line bg-void-3 p-5 shadow-sm">
                 <div className="flex items-baseline justify-between">
                   <div className="text-[14px] font-semibold">Why</div>
-                  <span className="font-mono text-[10px] uppercase tracking-widest text-[#a8a29e]">
+                  <span className="font-mono text-[10px] uppercase tracking-widest text-ink-faint">
                     {explanation.kind} · {explanation.space}
                   </span>
                 </div>
-                <p className="mt-1.5 text-[12px] text-[#57534e]">{explanation.summary}</p>
+                <p className="mt-1.5 text-[12px] text-ink-dim">{explanation.summary}</p>
                 <div className="mt-4 space-y-2">
                   {explanation.attributions.slice(0, 8).map((a) => {
                     const max = Math.max(...explanation.attributions.map((x) => Math.abs(x.attribution)), 1e-6);
@@ -322,11 +349,11 @@ export function BodyExplorer({ moduleId, accent }: Props) {
                     const up = a.direction === "increases_risk";
                     return (
                       <div key={a.feature} className="flex items-center gap-2.5">
-                        <span className="w-36 shrink-0 truncate font-mono text-[10px] text-[#57534e]">
+                        <span className="w-36 shrink-0 truncate font-mono text-[10px] text-ink-dim">
                           {a.feature}
                         </span>
-                        <div className="relative h-3.5 flex-1 rounded bg-[#f5f5f4]">
-                          <div className="absolute left-1/2 top-0 h-full w-px bg-[#e7e0d5]" />
+                        <div className="relative h-3.5 flex-1 rounded bg-white/5">
+                          <div className="absolute left-1/2 top-0 h-full w-px bg-line" />
                           <div
                             className="absolute top-0.5 h-2.5 rounded-sm"
                             style={{
@@ -336,7 +363,7 @@ export function BodyExplorer({ moduleId, accent }: Props) {
                             }}
                           />
                         </div>
-                        <span className="w-12 shrink-0 text-right font-mono text-[10px] tabular-nums text-[#78716c]">
+                        <span className="w-12 shrink-0 text-right font-mono text-[10px] tabular-nums text-ink-dim">
                           {a.attribution > 0 ? "+" : ""}
                           {a.attribution.toFixed(2)}
                         </span>
@@ -344,20 +371,20 @@ export function BodyExplorer({ moduleId, accent }: Props) {
                     );
                   })}
                 </div>
-                <ul className="mt-4 space-y-1.5 border-t border-[#f5f5f4] pt-3">
+                <ul className="mt-4 space-y-1.5 border-t border-white/5 pt-3">
                   {explanation.caveats.map((c) => (
-                    <li key={c} className="text-[10.5px] leading-relaxed text-[#a8a29e]">— {c}</li>
+                    <li key={c} className="text-[10.5px] leading-relaxed text-ink-faint">— {c}</li>
                   ))}
                 </ul>
               </div>
             )}
 
             {raw && (
-              <details className="rounded-2xl border border-[#e7e0d5] bg-white p-5 shadow-sm">
-                <summary className="cursor-pointer font-mono text-[11px] uppercase tracking-[0.14em] text-[#a8a29e]">
+              <details className="rounded-2xl border border-line bg-void-3 p-5 shadow-sm">
+                <summary className="cursor-pointer font-mono text-[11px] uppercase tracking-[0.14em] text-ink-faint">
                   Raw response
                 </summary>
-                <pre className="mt-3 max-h-96 overflow-auto rounded-lg bg-[#fafaf9] p-3 font-mono text-[10.5px] leading-relaxed text-[#44403c]">
+                <pre className="mt-3 max-h-96 overflow-auto rounded-lg bg-white/5 p-3 font-mono text-[10.5px] leading-relaxed text-ink-dim">
                   {raw}
                 </pre>
               </details>

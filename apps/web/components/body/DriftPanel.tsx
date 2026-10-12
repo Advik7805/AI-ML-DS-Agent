@@ -66,7 +66,7 @@ export function DriftPanel({
 
   if (error) {
     return (
-      <div className="rounded-2xl border border-[#fecaca] bg-[#fef2f2] p-5 text-[12.5px] text-[#991b1b]">
+      <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-5 text-[12.5px] text-red-300">
         Drift check unavailable ({error}).
       </div>
     );
@@ -74,7 +74,7 @@ export function DriftPanel({
 
   if (busy || !data) {
     return (
-      <div className="animate-pulse rounded-2xl border border-[#e7e0d5] bg-white p-5 text-[12.5px] text-[#a8a29e]">
+      <div className="animate-pulse rounded-2xl border border-line bg-void-3 p-5 text-[12.5px] text-ink-faint">
         Comparing against the training distribution…
       </div>
     );
@@ -85,22 +85,22 @@ export function DriftPanel({
   const mod = data.thresholds?.moderate ?? 0.1;
   const tone =
     data.mean_psi >= sig
-      ? { bar: "#dc2626", bg: "#fef2f2", border: "#fecaca", text: "#991b1b" }
+      ? { bar: "#dc2626", bg: "rgba(239,68,68,0.10)", border: "rgba(239,68,68,0.30)", text: "#fca5a5" }
       : data.mean_psi >= mod
-        ? { bar: "#d97706", bg: "#fffbeb", border: "#fde68a", text: "#92400e" }
-        : { bar: "#16a34a", bg: "#f0fdf4", border: "#bbf7d0", text: "#166534" };
+        ? { bar: "#d97706", bg: "rgba(245,158,11,0.10)", border: "rgba(245,158,11,0.35)", text: "var(--color-churn)" }
+        : { bar: "#16a34a", bg: "#f0fdf4", border: "#bbf7d0", text: "#6ee7b7" };
 
   const pct = Math.min(100, (data.mean_psi / sig) * 100);
 
   return (
-    <div className="rounded-2xl border border-[#e7e0d5] bg-white p-5 shadow-sm">
+    <div className="rounded-2xl border border-line bg-void-3 p-5 shadow-sm">
       <div className="flex items-baseline justify-between gap-3">
-        <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-[#a8a29e]">
+        <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-ink-faint">
           {label}
         </div>
         <button
           onClick={load}
-          className="rounded-lg border border-[#e7e0d5] px-2.5 py-1 text-[11px] font-medium text-[#57534e] transition hover:bg-[#fafaf9]"
+          className="rounded-lg border border-line px-2.5 py-1 text-[11px] font-medium text-ink-dim transition hover:bg-white/5"
         >
           Recheck
         </button>
@@ -132,11 +132,11 @@ export function DriftPanel({
               key={f.feature}
               className="flex items-baseline justify-between gap-2 font-mono text-[11px]"
             >
-              <span className="truncate text-[#78716c]">{f.feature}</span>
+              <span className="truncate text-ink-dim">{f.feature}</span>
               <span
                 className="tabular-nums"
                 style={{
-                  color: f.psi >= sig ? "#dc2626" : f.psi >= mod ? "#d97706" : "#a8a29e",
+                  color: f.psi >= sig ? "#dc2626" : f.psi >= mod ? "#d97706" : "var(--color-ink-faint)",
                 }}
               >
                 {f.psi.toFixed(4)}
@@ -147,13 +147,13 @@ export function DriftPanel({
       )}
 
       {data.features_missing_from_batch && data.features_missing_from_batch.length > 0 && (
-        <p className="mt-3 rounded-lg bg-[#fffbeb] p-2 text-[10.5px] leading-relaxed text-[#92400e]">
+        <p className="mt-3 rounded-lg bg-churn/10 p-2 text-[10.5px] leading-relaxed text-churn">
           Missing from this batch: {data.features_missing_from_batch.slice(0, 5).join(", ")}.
           That is a schema problem, not drift, and it is reported separately for that reason.
         </p>
       )}
 
-      <p className="mt-3 border-t border-[#f5f5f4] pt-2.5 text-[10.5px] leading-relaxed text-[#a8a29e]">
+      <p className="mt-3 border-t border-white/5 pt-2.5 text-[10.5px] leading-relaxed text-ink-faint">
         Population Stability Index per feature, with bin edges cut on the training distribution
         and never moved — re-binning on incoming data would measure it against itself and never
         show drift. Computed on marginals, so a joint shift that leaves every marginal unchanged

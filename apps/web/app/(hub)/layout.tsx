@@ -3,6 +3,8 @@ import Link from "next/link";
 
 import "../globals.css";
 
+import { WakeIndicator } from "@/components/body/WakingNotice";
+
 /*
   The HUB root layout.
 
@@ -49,6 +51,24 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
 
           <nav className="flex items-center gap-1 text-[13px]">
             <Link
+              href="#tenant"
+              className="rounded-lg px-3 py-1.5 text-ink-dim transition hover:bg-white/5 hover:text-ink"
+            >
+              The company
+            </Link>
+            <Link
+              href="#upload"
+              className="rounded-lg px-3 py-1.5 text-ink-dim transition hover:bg-white/5 hover:text-ink"
+            >
+              Your data
+            </Link>
+            <Link
+              href="#guide"
+              className="rounded-lg px-3 py-1.5 text-ink-dim transition hover:bg-white/5 hover:text-ink"
+            >
+              Guide
+            </Link>
+            <Link
               href="#bodies"
               className="rounded-lg px-3 py-1.5 text-ink-dim transition hover:bg-white/5 hover:text-ink"
             >
@@ -76,6 +96,8 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
         </header>
 
         <main className="relative z-10">{children}</main>
+
+        <WakeIndicator />
 
         <footer className="relative z-10 border-t border-line px-6 py-10 text-center text-xs text-ink-faint sm:px-10">
           <p>
