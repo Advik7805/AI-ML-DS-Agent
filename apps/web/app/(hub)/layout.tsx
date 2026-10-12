@@ -3,6 +3,8 @@ import Link from "next/link";
 
 import "../globals.css";
 
+import { WakeIndicator } from "@/components/body/WakingNotice";
+
 /*
   The HUB root layout.
 
@@ -94,6 +96,8 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
         </header>
 
         <main className="relative z-10">{children}</main>
+
+        <WakeIndicator />
 
         <footer className="relative z-10 border-t border-line px-6 py-10 text-center text-xs text-ink-faint sm:px-10">
           <p>

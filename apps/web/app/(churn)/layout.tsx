@@ -3,6 +3,8 @@ import Link from "next/link";
 
 import "../globals.css";
 
+import { WakeIndicator } from "@/components/body/WakingNotice";
+
 /*
   The CHURN storefront root layout — a second, independent root layout.
 
@@ -75,6 +77,8 @@ export default function ChurnLayout({ children }: { children: React.ReactNode })
         </header>
 
         <main className="relative z-10">{children}</main>
+
+        <WakeIndicator />
 
         <footer className="relative z-10 mt-16 border-t border-line px-5 py-8">
           <div className="mx-auto max-w-6xl text-[12px] text-ink-faint">

@@ -34,10 +34,19 @@ from core.types import (
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    """Discover every body under ``modules/`` once, at startup, then build the hub agent."""
+    """Discover the bodies, build the agent, and start warming models in the background.
+
+    Warm-up is a daemon thread and is *not* awaited: a body trains lazily on first use, so
+    without this the first user request pays for training on top of the cold start — a 14.5 s
+    tool call in a real trace. `/health` must stay instant, and a health check that blocks on
+    model training is a health check that fails the deploy.
+    """
     global agent
     registry.discover("modules")
     agent = HubAgent(registry, get_provider())
+    from core import warmup
+
+    warmup.start_background(registry)
     yield
 
 
@@ -140,11 +149,33 @@ class ToolCallResponse(BaseModel):
 
 @app.get("/health")
 def health() -> dict[str, Any]:
+    """Always instant. Reports warm-up *state*, never waits for it."""
+    from core import warmup
+
+    warm = warmup.state()
     return {
         "status": "ok",
         "modules_loaded": registry.ids(),
         "load_errors": getattr(registry, "load_errors", {}),
+        "warmup": {
+            "status": warm["status"],
+            "seconds": warm["seconds"],
+            "ready": sum(1 for b in warm["bodies"].values() if b.get("ok")),
+            "total": len(warm["bodies"]) or len(warmup.trainable_bodies()),
+        },
     }
+
+
+@app.get("/api/v1/warmup")
+def warmup_state() -> dict[str, Any]:
+    """Per-body warm-up outcome: which models are loaded, which failed, and how long it took.
+
+    Exposed because the alternative is guessing: if the first tool call is still slow, this says
+    whether a model is still training or whether something actually failed.
+    """
+    from core import warmup
+
+    return {"state": warmup.state(), "trainable": list(warmup.trainable_bodies())}
 
 
 @app.get("/api/v1/modules", response_model=list[ModuleManifest])
@@ -447,6 +478,13 @@ def call_tool(tool_name: str, body: ToolCallRequest) -> ToolCallResponse:
         raise HTTPException(status_code=404, detail=str(exc)) from None
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
+    except Exception as exc:  # noqa: BLE001 - a tool must fail with a reason, never an empty body
+        # An unhandled exception here used to surface as `500 {"detail": ""}`, which tells the
+        # caller nothing. Report what broke and where.
+        raise HTTPException(
+            status_code=500,
+            detail=f"{tool_name} failed: {type(exc).__name__}: {exc}",
+        ) from None
 
     # A document uploaded this session must be visible to the knowledge tool, or "upload a
     # policy and ask about it" would silently only work through the chat path.

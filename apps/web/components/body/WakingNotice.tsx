@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useState } from "react";
+
 /**
  * The shared "the backend is asleep, this is normal" banner.
  *
@@ -66,6 +68,43 @@ export function WakingNotice({
             Retry
           </button>
         )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One global indicator, driven by the events `clientFetch` emits.
+ *
+ * Mounted once per root layout rather than once per board: eleven components each showing their
+ * own "retrying…" banner is noise, and eleven different wordings for the same situation is worse.
+ */
+export function WakeIndicator() {
+  const [attempt, setAttempt] = useState<{ n: number; total: number } | null>(null);
+
+  useEffect(() => {
+    const onWake = (e: Event) => {
+      const detail = (e as CustomEvent<{ attempt?: number; retries?: number }>).detail ?? {};
+      setAttempt({ n: detail.attempt ?? 1, total: detail.retries ?? 3 });
+    };
+    const onAwake = () => setAttempt(null);
+    window.addEventListener("saros:wake", onWake);
+    window.addEventListener("saros:awake", onAwake);
+    return () => {
+      window.removeEventListener("saros:wake", onWake);
+      window.removeEventListener("saros:awake", onAwake);
+    };
+  }, []);
+
+  if (!attempt) return null;
+  return (
+    <div className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2">
+      <div className="glass flex items-center gap-2.5 rounded-full px-4 py-2 text-[12px] text-ink-dim shadow-2xl">
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-hub" />
+        <span>
+          <strong className="font-medium text-ink">Waking the API…</strong> free tiers sleep after
+          15 min idle. Retrying ({attempt.n}/{attempt.total}).
+        </span>
       </div>
     </div>
   );

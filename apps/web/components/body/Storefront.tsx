@@ -4,6 +4,7 @@ import Link from "next/link";
 import "@/app/globals.css";
 
 import { BackdropVideo } from "./BackdropVideo";
+import { WakeIndicator } from "./WakingNotice";
 import { StorefrontField } from "./StorefrontField";
 
 /**
@@ -96,6 +97,8 @@ export function Storefront({ p, children }: { p: StorefrontProps; children: Reac
           </div>
           {children}
         </main>
+
+        <WakeIndicator />
 
         <footer className="relative z-10 mt-16 border-t border-line px-5 py-8">
           <div className="mx-auto max-w-6xl text-[12px] text-ink-faint">
