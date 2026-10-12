@@ -1,6 +1,8 @@
 import Link from "next/link";
 
 import { AgentChat } from "@/components/hub/AgentChat";
+import { AnalyzeUpload } from "@/components/hub/AnalyzeUpload";
+import { BodyGuide } from "@/components/hub/BodyGuide";
 import { IntegrationsPanel } from "@/components/hub/IntegrationsPanel";
 import { RunLog } from "@/components/hub/RunLog";
 import { ModuleGraph } from "@/components/hub/ModuleGraph";
@@ -64,9 +66,9 @@ export default async function HubPage() {
             </span>
           </h1>
           <p className="mx-auto mt-6 max-w-xl text-[15px] leading-relaxed text-ink-dim">
-            The senior data scientist&rsquo;s toolchain assembled into one connected product —
-            retrieval, streaming anomaly detection, forecasting, explainable AI, pricing and
-            churn — reachable through a single agent that can call any of them.
+            Turn operational data into a decision your team can act on. Find customers at risk,
+            flag unusual payments, prioritize maintenance, check a policy, or test a safer price —
+            with the evidence and next step in view.
           </p>
         </div>
 
@@ -78,6 +80,18 @@ export default async function HubPage() {
             each body retries on its own.
           </div>
         )}
+      </section>
+
+      {/* --- upload analysis -------------------------------------------------- */}
+      <section id="analyze" className="scroll-mt-20 border-t border-line px-6 py-16 sm:px-10">
+        <div className="mx-auto max-w-5xl">
+          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-hub">Bring your own data</p>
+          <h2 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">Analyze your data</h2>
+          <p className="mb-7 mt-2 max-w-2xl text-[14px] leading-relaxed text-ink-dim">
+            Score customer, transaction or engine rows with the existing models, estimate SKU elasticity from your POS history, or search a temporary document index. Uploads stay in memory and never retrain shared models.
+          </p>
+          <AnalyzeUpload />
+        </div>
       </section>
 
       {/* --- bodies ---------------------------------------------------------- */}
@@ -101,6 +115,11 @@ export default async function HubPage() {
             ))}
           </div>
         </div>
+      </section>
+
+      {/* --- guide ----------------------------------------------------------- */}
+      <section id="guide" className="scroll-mt-20 border-t border-line px-6 py-16 sm:px-10">
+        <BodyGuide modules={modules} />
       </section>
 
       {/* --- agent ----------------------------------------------------------- */}

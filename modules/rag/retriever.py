@@ -115,6 +115,11 @@ class Retriever:
                 self._passages.append((row["source"], head, text))
         self._n_external = len(self._passages) - n_local
 
+        self._index()
+        return self
+
+    def _index(self) -> None:
+        """Build the lexical index for the current passage list."""
         # sublinear_tf damps the advantage of long passages; ngram_range picks up phrases like
         # "customer service" that unigrams alone would split.
         self._vectorizer = TfidfVectorizer(
@@ -126,7 +131,22 @@ class Retriever:
             stop_words="english",
         )
         self._matrix = self._vectorizer.fit_transform([t for _, _, t in self._passages])
-        return self
+
+    def with_documents(self, documents: list[tuple[str, str]]) -> "Retriever":
+        """Return a separately indexed copy augmented with these session documents.
+
+        The base retriever is never mutated, so an upload from one browser session cannot leak
+        into another session's search results.
+        """
+        overlay = Retriever(self.corpus_dir)
+        overlay._passages = list(self._passages)
+        overlay._n_external = self._n_external
+        overlay._external_error = self._external_error
+        for source, content in documents:
+            for heading, text in _chunk(content):
+                overlay._passages.append((source, heading, text))
+        overlay._index()
+        return overlay
 
     @property
     def size(self) -> int:
@@ -161,5 +181,6 @@ class Retriever:
             return "_No passages matched; this answer is not grounded in the knowledge base._"
         lines = ["**Sources**"]
         for p in passages:
-            lines.append(f"- `{p.source}.md` → {p.heading} (relevance {p.score:.2f})")
+            source = p.source if Path(p.source).suffix else f"{p.source}.md"
+            lines.append(f"- `{source}` → {p.heading} (relevance {p.score:.2f})")
         return "\n".join(lines)

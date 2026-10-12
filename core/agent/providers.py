@@ -10,11 +10,10 @@ One protocol, four implementations:
 - ``GeminiProvider`` — Google's REST API, free tier.
 - ``EchoProvider``   — never calls anything; useful for isolating graph bugs.
 
-Selection is by env var, so nothing in the codebase branches on which vendor you picked:
-
-    SAROS_LLM=mock | groq | gemini | echo
-    GROQ_API_KEY=...
-    GEMINI_API_KEY=...
+Provider selection is automatic by default: Groq when ``GROQ_API_KEY`` is present, Gemini
+when only ``GEMINI_API_KEY`` is present, and the deterministic mock when neither key exists.
+``SAROS_LLM`` can explicitly select ``auto | mock | groq | gemini | echo``; explicit vendor
+selection wins over automatic key detection and still falls back to mock if its key is missing.
 
 Groq and Gemini are called over plain HTTP rather than through their SDKs: two fewer heavy
 dependencies in an image that has to fit in 512 MB on a free tier.
@@ -137,7 +136,7 @@ _TOOL_HINTS: list[tuple[str, str]] = [
     (r"(?=[\s\S]*\b(list\w*|show|what'?s|how many|which|catalog\w*)\b)"
      r"(?=[\s\S]*\b(sources?|corpus|documents?|indexed)\b)", "list_knowledge_sources"),
     (r"\b(sources?|corpus|what.{0,12}indexed)\b", "list_knowledge_sources"),
-    (r"\b(search\w*|knowledge|polic(?:y|ies)|refunds?|sla\b|what does|approv\w*|discount|playbook|privacy)\b",
+    (r"\b(search\w*|uploaded?|uploads?|files?|documents?|knowledge|polic(?:y|ies)|refunds?|sla\b|what does|approv\w*|discount|playbook|privacy)\b",
      "search_knowledge"),
     # Ahead of scrape_url, whose `scrape\w*` also matches "scraper" in "what can the scraper
     # do". Left below it, a question *about* the scraper was answered by using it.
@@ -241,8 +240,8 @@ class MockProvider:
                     content=(
                         "I can score churn risk, rank an at-risk portfolio, report model metrics, "
                         "search the knowledge base, score a transaction for fraud, or scrape a URL. "
-                        "Tell me which. (Running on the mock provider — set SAROS_LLM=groq or "
-                        "gemini for real reasoning.)"
+                        "Tell me which. (Running on the deterministic mock. Set GROQ_API_KEY or "
+                        "GEMINI_API_KEY for live reasoning, or SAROS_LLM=mock to keep the demo offline.)"
                     ),
                 )
             args = self._args_for(tool, user_text, by_name[tool])
@@ -611,9 +610,10 @@ def _summarise(tool_output: str) -> str:
 
         if "n_flagged" in data and "true_positives" in data:
             note = f" ({data['enrichment_note']})" if data.get("enriched") else ""
+            source = f" from {data['data_source']}" if data.get("data_source") else ""
             top = ", ".join(f"${t['amount']:.0f}@{t['risk']*100:.0f}%" for t in data.get("top_flagged", [])[:3])
             return (
-                f"Scored {data['n_scored']} transactions{note}: {data['n_flagged']} flagged — "
+                f"Scored {data['n_scored']} transactions{source}{note}: {data['n_flagged']} flagged — "
                 f"{data['true_positives']} true, {data['false_positives']} false, "
                 f"{data['missed_fraud']} missed.\nTop flags: {top or 'none'}."
             )
@@ -641,10 +641,12 @@ def _summarise(tool_output: str) -> str:
 
         if "results" in data and "citation" in data:
             rows = data["results"]
+            session_sources = data.get("session_sources") or []
             if not rows:
+                scope = "the built-in corpus and active session uploads" if session_sources else "the knowledge base"
                 return (
-                    "Nothing in the knowledge base matches that. "
-                    "I am not going to answer from memory."
+                    f"Nothing in {scope} matches that. I am not going to answer from memory. "
+                    f"{data.get('decision', '')}"
                 )
             grounding = data.get("grounding", "Unknown grounding")
             head = f"**{grounding}** ({data.get('matched_terms', 0)} substantive terms matched)"
@@ -653,16 +655,34 @@ def _summarise(tool_output: str) -> str:
             elif grounding == "No grounding":
                 return f"**No grounding.** {data.get('decision', '')}"
             lines = [head, ""]
+            if session_sources:
+                lines.append("Searched this browser session's uploads: " + ", ".join(f"`{s}`" for s in session_sources) + ".")
+            elif data.get("session_requested"):
+                lines.append(
+                    "No uploaded files are currently available in this browser session; this search used only the built-in sample corpus. "
+                    "Session uploads are temporary and may have expired after an API restart or eviction."
+                )
             for r in rows[:4]:
-                lines.append(f"- `{r['source']}.md` → **{r['heading']}** ({r['score']:.2f})")
+                source = str(r["source"])
+                if not re.search(r"\.[^/]+$", source):
+                    source += ".md"
+                lines.append(f"- `{source}` → **{r['heading']}** ({r['score']:.2f})")
                 lines.append(f"  {r['snippet'][:240]}")
+            if data.get("citation"):
+                lines.extend(["", str(data["citation"])])
             return "\n".join(lines)
 
         if "n_documents" in data and "sources" in data:
-            return (
-                f"The knowledge base holds {data['n_documents']} documents across "
+            session_sources = data.get("session_sources") or []
+            summary = (
+                f"The knowledge index holds {data['n_documents']} documents across "
                 f"{data['n_passages']} passages: " + ", ".join(f"`{s}`" for s in data["sources"]) + "."
             )
+            if session_sources:
+                summary += " Session uploads: " + ", ".join(f"`{s}`" for s in session_sources) + "."
+            elif data.get("session_requested"):
+                summary += " No uploads are currently available in this session; temporary documents may have expired after a restart or eviction."
+            return summary
 
         if "top" in data and "n_skus" in data:
             rows = data["top"]
@@ -805,17 +825,24 @@ def _summarise(tool_output: str) -> str:
 
 
 def get_provider(name: str | None = None) -> Provider:
-    """Resolve the provider from env. Never raises for a missing key — falls back to mock.
+    """Resolve an explicit override, or auto-select the best configured live provider.
 
-    A student deploying on a free tier will frequently have no key configured, and the hub
-    should still be a working product rather than a 500.
+    Auto mode prefers Groq when its key is set, then Gemini, then the deterministic mock.
+    Explicit provider selection remains authoritative; missing keys always degrade to mock so
+    a zero-key deployment is still a working product rather than a 500.
     """
-    name = (name or os.getenv("SAROS_LLM", "mock")).strip().lower()
-    if name in ("groq", "gemini"):
+    selection = (name if name is not None else os.getenv("SAROS_LLM", "auto")).strip().lower()
+    if selection in ("", "auto"):
+        selection = (
+            "groq" if os.getenv("GROQ_API_KEY") else
+            "gemini" if os.getenv("GEMINI_API_KEY") else
+            "mock"
+        )
+    if selection in ("groq", "gemini"):
         try:
-            return GroqProvider() if name == "groq" else GeminiProvider()
+            return GroqProvider() if selection == "groq" else GeminiProvider()
         except RuntimeError:
             return MockProvider()
-    if name == "echo":
+    if selection == "echo":
         return EchoProvider()
     return MockProvider()

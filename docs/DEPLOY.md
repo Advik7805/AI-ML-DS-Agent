@@ -81,13 +81,16 @@ server-side, which is also what makes the preview URLs work and removes CORS fro
 
 ## 4. Light up the integrations, one at a time
 
-Nothing below is required. Add a key, set its flag, redeploy. The hub's **External services**
-panel and `GET /api/v1/integrations` show what is live and what is still mocked.
+Nothing below is required. Add a key, set its flag where required, and redeploy. The hub's
+**External services** panel and `GET /api/v1/integrations` show what is live and what is still
+mocked. The LLM selector defaults to `SAROS_LLM=auto`: a Groq key wins when both keys exist,
+then Gemini, then the deterministic mock. You can pin a provider with `SAROS_LLM=groq|gemini`
+or force offline mode with `SAROS_LLM=mock`.
 
 | Service | Env vars | Free tier | What it unlocks |
 |---|---|---|---|
-| **Groq** | `GROQ_API_KEY`, `SAROS_LLM=groq` | free tier, per-minute limits | real reasoning in the hub agent |
-| **Gemini** | `GEMINI_API_KEY`, `SAROS_LLM=gemini` | free tier, per-day limits | same, second vendor |
+| **Groq** | `GROQ_API_KEY` (auto-selected), or `SAROS_LLM=groq` to pin | free tier, per-minute limits | real reasoning in the hub agent |
+| **Gemini** | `GEMINI_API_KEY` (auto-selected if Groq is absent), or `SAROS_LLM=gemini` to pin | free tier, per-day limits | same, second vendor |
 | **Tavily** | `TAVILY_API_KEY`, `SAROS_TAVILY_LIVE=1` | **1,000 credits/month, students free** | `web_search`, `extract_url` |
 | **Jina Reader** | `JINA_API_KEY` *(optional)* | **~20 req/min with no key**; 500 RPM + 10M tokens with a free key | `render_url` — works with zero configuration |
 | **Firecrawl** | `FIRECRAWL_API_KEY`, `SAROS_FIRECRAWL_LIVE=1` | 500 credits **one-time** | `render_url` fallback, only if configured |
@@ -153,7 +156,7 @@ Worth understanding before you debug a "why is this still mock?" question.
 |---|---|---|
 | Pages render, every API call fails | `API_ORIGIN` unset or wrong | Set it in Vercel; no trailing slash |
 | First request after idle takes ~60s | Render free tier spin-down | Normal. Add the `SAROS_API_URL` secret |
-| Agent answers look templated | `SAROS_LLM=mock` | Set a key and `SAROS_LLM=groq`/`gemini` |
+| Agent answers look templated | No LLM key in auto mode, or `SAROS_LLM=mock` | Add `GROQ_API_KEY` or `GEMINI_API_KEY` (auto selects); pin with `SAROS_LLM=groq`/`gemini` if needed |
 | Web search returns placeholders | Tavily key set but flag off | Also set `SAROS_TAVILY_LIVE=1` |
 | `429` responses | Rate limit | Expected; `X-RateLimit-*` headers say which backend counted |
 | A body is missing from the hub | It failed to import | `GET /health` → check `load_errors` |

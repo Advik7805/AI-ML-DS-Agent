@@ -73,6 +73,18 @@ export interface MetricsReport {
   group_basis: string;
 }
 
+export interface UploadAnalysis {
+  module_id: string;
+  filename: string | null;
+  source_label: string | null;
+  n_rows: number;
+  metrics: MetricsReport;
+  predictions: Prediction[];
+  predictions_truncated: boolean;
+  session_id: string | null;
+  session_sources: string[];
+}
+
 export interface HealthResponse {
   status: string;
   modules_loaded: string[];

@@ -138,3 +138,20 @@ class MetricsReport(BaseModel):
     #: How the grouping was defined. Required whenever ``groups`` is non-empty, so a
     #: breakdown can never be reported without saying what it was sliced by.
     group_basis: str = ""
+
+
+class UploadAnalysis(BaseModel):
+    """Analyze-your-data result using the platform's shared metric/prediction contracts."""
+
+    module_id: str
+    filename: str | None = None
+    #: Optional attribution supplied by the uploader; never inferred from demo/model data.
+    source_label: str | None = None
+    n_rows: int
+    metrics: MetricsReport
+    predictions: list[Prediction] = Field(default_factory=list)
+    predictions_truncated: bool = False
+    #: Opaque, browser-scoped id for the in-memory RAG/session report index.
+    session_id: str | None = None
+    #: Files and generated analysis reports indexed for the current session.
+    session_sources: list[str] = Field(default_factory=list)

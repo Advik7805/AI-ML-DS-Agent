@@ -215,12 +215,16 @@ class XaiHealthModule(Module):
         return self._bundle
 
     def train(self, config: dict[str, Any] | None = None) -> MetricsReport:
-        bundle, report = train_health(**(config or {}))
-        bundle.save()
-        self._bundle, self._report = bundle, report
+        with self._lock:
+            bundle, report = train_health(**(config or {}))
+            bundle.save()
+            self._bundle, self._report = bundle, report
         return report
 
     def evaluate(self) -> MetricsReport:
+        if self._report is None:
+            # Wait for the lifespan background warm-up before considering another train.
+            _ = self.bundle
         if self._report is None:
             self.train()
         assert self._report is not None

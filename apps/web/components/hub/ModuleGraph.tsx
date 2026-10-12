@@ -167,7 +167,7 @@ function Body({ node, onHover }: { node: Node; onHover: (id: string | null) => v
       </Float>
       {hovered && (
         <Html center distanceFactor={9} style={{ pointerEvents: "none" }}>
-          <div className="w-max -translate-y-10 rounded-lg border border-white/15 bg-[#0a0c14]/95 px-3 py-2 text-center shadow-2xl backdrop-blur">
+          <div className="w-max -translate-y-10 rounded-lg border border-white/15 bg-void-2/95 px-3 py-2 text-center shadow-2xl backdrop-blur">
             <div className="text-[11px] font-semibold tracking-wide text-white">{node.title}</div>
             <div className="mt-0.5 text-[10px] uppercase tracking-wider" style={{ color: node.accent }}>
               {node.live ? "live" : "planned"}
@@ -258,7 +258,7 @@ export function ModuleGraph({ live }: { live: ModuleManifest[] }) {
         /* Reduced-motion / pre-mount fallback: the same information, statically. */
         <div className="flex h-full w-full items-center justify-center">
           <div className="relative flex h-64 w-64 items-center justify-center rounded-full border border-white/10">
-            <div className="h-20 w-20 rounded-2xl bg-[#7c5cff] shadow-[0_0_80px_20px_rgba(124,92,255,0.45)]" />
+            <div className="h-20 w-20 rounded-2xl bg-hub shadow-[0_0_80px_20px_rgba(124,92,255,0.45)]" />
             {nodes.map((n, i) => {
               const a = (i / nodes.length) * Math.PI * 2;
               return (

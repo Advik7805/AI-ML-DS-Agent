@@ -8,7 +8,7 @@ export default function Page() {
   return (
     <>
       <div className="mx-auto max-w-6xl px-5 pb-8">
-        <p className="max-w-2xl text-[15px] leading-relaxed text-[#57534e]">A supervised model for the fraud you have seen, an isolation forest for the fraud you have not, combined by max. The demo stream is labelled, so the panel can show the misses and not just the catches.</p>
+        <p className="max-w-2xl text-[15px] leading-relaxed text-ink-dim">The supervised classifier and isolation forest score transactions, with the higher risk score winning. Training and stream examples are deterministic synthetic demonstrations—not real company data. Upload your own supported CSV to score it with the existing model; uploads do not retrain it.</p>
       </div>
 
       <section id="board" className="mx-auto max-w-6xl scroll-mt-24 px-5 pb-10">
@@ -17,7 +17,7 @@ export default function Page() {
 
       <section id="drift" className="mx-auto max-w-6xl scroll-mt-24 px-5 pb-10">
         <h2 className="pb-1.5 text-[18px] font-semibold tracking-tight">Model health</h2>
-        <p className="max-w-2xl pb-4 text-[13.5px] leading-relaxed text-[#57534e]">Trained once, served indefinitely — so the panel below compares a fresh batch against the distribution the model learned from. A model that stays confident while its inputs move is the failure that matters most on a live feed.</p>
+        <p className="max-w-2xl pb-4 text-[13.5px] leading-relaxed text-ink-dim">Trained once, served indefinitely — so the panel below compares a fresh batch against the distribution the model learned from. A model that stays confident while its inputs move is the failure that matters most on a live feed.</p>
         <div className="max-w-xl">
           <DriftPanel tool="check_fraud_drift" accent="#f43f5e" label="Fraud feed drift" />
         </div>

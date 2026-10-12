@@ -22,7 +22,8 @@ import pandas as pd
 from sklearn.linear_model import LinearRegression
 
 from core.contract import Module
-from core.types import AgentTool, Explanation, MetricsReport, ModuleManifest, Prediction
+from core.types import AgentTool, Explanation, MetricsReport, ModuleManifest, Prediction, UploadAnalysis
+from core.upload_utils import MAX_RETURNED_PREDICTIONS, coerce_numeric_columns, read_csv_table
 
 ACCENT = "#34d399"
 
@@ -120,6 +121,97 @@ class PricingModule(Module):
             _ = self.model
         assert self._df is not None
         return self._df
+
+    def analyze_upload(
+        self,
+        filename: str | None,
+        content: bytes | None,
+        *,
+        session_id: str | None = None,
+        query: str = "",
+    ) -> UploadAnalysis:
+        del session_id, query
+        if not filename or not filename.lower().endswith(".csv") or content is None:
+            raise ValueError("Pricing analysis requires a CSV with sku, price, and demand columns.")
+        required = ["sku", "price", "demand"]
+        frame = read_csv_table(
+            content,
+            filename,
+            module_id=self.id,
+            expected_columns=required,
+        )
+        frame = coerce_numeric_columns(frame, ("price", "demand"))
+        frame["sku"] = frame["sku"].astype("string").str.strip()
+        if frame["sku"].isna().any() or (frame["sku"] == "").any():
+            raise ValueError("Pricing CSV column 'sku' cannot contain blank values.")
+
+        original_rows = len(frame)
+        usable = frame.dropna(subset=["price", "demand"])
+        usable = usable[(usable["price"] > 0) & (usable["demand"] > 0)].copy()
+        n_skus = usable["sku"].nunique()
+        if n_skus > 500:
+            raise ValueError("Pricing uploads are capped at 500 distinct SKUs per analysis.")
+        if usable.empty:
+            raise ValueError("Pricing CSV needs positive price and demand values for at least 10 rows per SKU.")
+
+        uploaded_model = ElasticityModel().fit(usable[required])
+        if not uploaded_model.coefficients:
+            raise ValueError(
+                "No SKU has 10 or more usable observations. Provide at least 10 positive-price, "
+                "positive-demand rows per SKU."
+            )
+        analyzer = PricingModule()
+        analyzer._model = uploaded_model
+        analyzer._df = usable[required]
+        predictions = [
+            analyzer.predict({"sku": sku})
+            for sku in sorted(uploaded_model.coefficients)
+        ]
+        identified = [
+            sku for sku in uploaded_model.coefficients
+            if abs(uploaded_model.coefficients[sku]) / max(uploaded_model.std_errors[sku], 1e-9) > 2.0
+        ]
+        n_fitted = len(uploaded_model.coefficients)
+        scores = {
+            "observations_used": float(len(usable)),
+            "sku_count": float(n_fitted),
+            "identified_share": len(identified) / max(1, n_fitted),
+            "mean_absolute_elasticity": float(np.mean([abs(uploaded_model.coefficients[s]) for s in uploaded_model.coefficients])),
+            "mean_r2": float(np.mean(list(uploaded_model.r2.values()))),
+        }
+        notes = [
+            "Elasticity was fitted from the uploaded POS history using log(demand) ~ log(price), separately per SKU.",
+            "Recommendations stay within each SKU's observed price range; no uploaded data is saved and the shared model is unchanged.",
+            "positive_rate is the share of fitted SKUs whose elasticity differs from zero by more than two standard errors.",
+        ]
+        dropped = original_rows - len(usable)
+        if dropped:
+            notes.append(f"Ignored {dropped:,} rows with missing or non-positive price/demand values.")
+        under_sampled = sorted(set(frame["sku"].astype(str)) - set(uploaded_model.coefficients))
+        if under_sampled:
+            notes.append(
+                "Skipped SKUs with fewer than 10 usable observations: "
+                + ", ".join(under_sampled[:20])
+                + ("…" if len(under_sampled) > 20 else ".")
+            )
+        predictions.sort(
+            key=lambda item: float(item.meta.get("estimated_revenue_uplift", 0.0)),
+            reverse=True,
+        )
+        return UploadAnalysis(
+            module_id=self.id,
+            filename=filename,
+            n_rows=original_rows,
+            metrics=MetricsReport(
+                n_samples=len(usable),
+                positive_rate=len(identified) / max(1, n_fitted),
+                scores=scores,
+                threshold=0.0,
+                notes=notes,
+            ),
+            predictions=predictions[:MAX_RETURNED_PREDICTIONS],
+            predictions_truncated=len(predictions) > MAX_RETURNED_PREDICTIONS,
+        )
 
     @property
     def manifest(self) -> ModuleManifest:

@@ -32,17 +32,25 @@ and identity — while connecting to the hub through one shared contract.
 | Knowledge RAG | `/rag` | 6-doc policy corpus | hit@1 **0.833**, 25 passages |
 | Web scraper | `/scraper` | mock by default | host-allowlisted, size-capped |
 
-**221 tests passing** (`python3 -m pytest -q`), across eight suites: contract conformance,
+**239 tests passing** (`python3 -m pytest -q`), across nine suites: contract conformance,
 per-body model quality, the gateway over HTTP, integrations, the LLM providers, explainer
-selection, experiment tracking and orchestration, and the churn body. **22 tools** register into
-one registry, names globally unique.
+selection, experiment tracking and orchestration, churn, and upload analysis. **22 tools**
+register into one registry, names globally unique.
 
 Results are read from the live gateway, not a notebook — e.g.
 `GET /api/v1/modules/churn/metrics` and `GET /api/v1/agent/tools`.
 
-The agent runs on a deterministic mock provider by default. Set `SAROS_LLM=groq` or
-`SAROS_LLM=gemini` with the matching key for real reasoning; a missing key falls back to mock
-rather than failing.
+The hub accepts in-memory multipart uploads at `POST /api/v1/modules/{id}/analyze` (10 MB
+maximum per file). Churn and fraud accept feature CSVs with optional outcome labels; pricing
+accepts `sku,price,demand` point-of-sale history; maintenance accepts CMAPSS-shaped CSV/TXT; RAG
+accepts Markdown, TXT or PDF and builds a bounded, session-scoped overlay in process memory.
+Uploads are not persisted or used to retrain shared models. The hub's **Analyze your data** panel
+lists the supported formats and data shapes.
+
+The agent defaults to `SAROS_LLM=auto`: it selects Groq when `GROQ_API_KEY` is set, otherwise
+Gemini when `GEMINI_API_KEY` is set, otherwise the deterministic mock. Set `SAROS_LLM=groq`,
+`gemini`, or `mock` to override selection explicitly; a selected live provider with no key falls
+back to mock rather than failing.
 
 **Drift detection on the real-time bodies.** `check_fraud_drift` and `check_fleet_drift` compare
 a fresh batch against the distribution each model was trained on, reporting per-feature
@@ -212,7 +220,7 @@ show what a deploy still needs. Copy [`.env.example`](.env.example) for the full
 |---|---|---|---|
 | **Jina Reader** | scraper | **~20 req/min with no key at all**; 500 RPM + 10M tokens with a free key | ✅ `render_url` — the default renderer |
 | Tavily | scraper, rag | 1,000 credits/mo, no card | ✅ `web_search`, `extract_url` |
-| Groq / Gemini | agent | free tiers | ✅ `SAROS_LLM=groq\|gemini` |
+| Groq / Gemini | agent | free tiers | ✅ auto-selects from `GROQ_API_KEY` / `GEMINI_API_KEY`; `SAROS_LLM` can override |
 | Supabase | rag | 500 MB, free forever | ✅ `knowledge_documents` — extra corpus, no redeploy |
 | Upstash | api, scraper | 10k commands/day | ✅ rate limiting on every metered route |
 | Firecrawl | scraper | 500 credits **one-time** | ✅ used for `render_url` only if configured |
