@@ -109,6 +109,44 @@ class AgentTool(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
 
 
+class DatasetCard(BaseModel):
+    """Where a body's numbers come from, and whose they are.
+
+    Every body carries one. It exists because "which company, which file, which rows, which
+    key?" is the first question a reviewer asks and the first thing an unexplained dashboard
+    fails to answer. A model that cannot say what it was trained on should not be trusted with
+    a decision, so the answer is a required field rather than a docstring.
+    """
+
+    module_id: str = ""
+    company: str = ""
+    company_note: str = ""
+    business_unit: str = ""
+    dataset: str = ""
+    grain: str = Field(default="", description="What one row is.")
+    key: str = Field(default="", description="Primary/join key, so cross-body joins are possible.")
+    target: str = Field(default="", description="What the model predicts, in business words.")
+    period: str = ""
+    origin: Literal["public-dataset", "generated", "corpus", "uploaded", "none"] = "none"
+    origin_detail: str = Field(default="", description="Exactly what the numbers are. Never vague.")
+    origin_url: str = ""
+    file: str = ""
+    rows: int | None = Field(default=None, description="Rows as shipped.")
+    observed_rows: int | None = Field(default=None, description="Rows the body actually read, once it has.")
+    observed_source: str = Field(default="", description="Real/synthetic marker reported by the loader.")
+    observed_basis: str = Field(
+        default="",
+        description=(
+            "What observed_rows counts. A loaded artifact can only report the split it was "
+            "trained on, and calling that 'rows read' would overstate what the card knows."
+        ),
+    )
+    system_of_record: str = Field(default="", description="Where this would live in production.")
+    why: str = ""
+    connect: str = Field(default="", description="How this body links to the others.")
+    caveats: list[str] = Field(default_factory=list)
+
+
 class ModuleManifest(BaseModel):
     """What the hub needs to render a body's tile and route to it."""
 
@@ -121,6 +159,9 @@ class ModuleManifest(BaseModel):
     capabilities: list[str] = Field(default_factory=list)
     routes: dict[str, str] = Field(default_factory=dict, description="e.g. {'ui': '/churn', 'api': '/api/v1/churn'}")
     tools: list[AgentTool] = Field(default_factory=list)
+    dataset: "DatasetCard | None" = Field(
+        default=None, description="Provenance for this body's data. Rendered on the body page."
+    )
 
 
 class MetricsReport(BaseModel):

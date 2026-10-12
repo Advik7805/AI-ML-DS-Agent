@@ -1,4 +1,6 @@
-# Churn Model Card
+# Churn Model Card — Northwind Connect
+
+Owner: Data Science, Northwind Connect · Model: `churn-gbm` · Tenant: Northwind Global
 
 ## Task
 Binary classification: will this customer churn within the next billing cycle?

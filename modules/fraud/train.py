@@ -38,6 +38,7 @@ class FraudModel:
     metrics: dict[str, float] = field(default_factory=dict)
     trained_at: str = ""
     n_train: int = 0
+    n_rows: int = 0
     base_rate: float = 0.0
     notes: list[str] = field(default_factory=list)
     #: Training distribution per feature, retained so incoming batches can be compared against
@@ -157,6 +158,7 @@ def train_fraud(*, n: int = 20000, random_state: int = 7) -> tuple[FraudModel, M
         feature_names=list(FEATURES),
         trained_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         n_train=len(X_fit),
+        n_rows=len(df),
         base_rate=float(y.mean()),
         notes=notes,
         # The fit set, not the whole frame: this is the distribution the supervised model saw.

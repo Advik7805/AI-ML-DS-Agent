@@ -22,6 +22,7 @@ import pandas as pd
 from sklearn.linear_model import LinearRegression
 
 from core.contract import Module
+from core.tenant import prediction_meta
 from core.types import AgentTool, Explanation, MetricsReport, ModuleManifest, Prediction
 
 ACCENT = "#34d399"
@@ -130,14 +131,23 @@ class PricingModule(Module):
             summary=(
                 "Own-price elasticity per SKU from point-of-sale history, then revenue-optimal "
                 "price subject to a demand floor. Recommendations are clipped to the observed "
-                "price range and carry their confidence interval."
+                "price range and carry their confidence interval. Data: Northwind Retail's point-of-sale "
+                "demand history for 24 own-brand SKUs (NW-SKU-###), 104 weeks, generated so the true "
+                "elasticity is known and the estimator can be audited against it."
             ),
             accent=ACCENT,
             status="live",
             capabilities=["regression", "elasticity", "optimisation", "uncertainty"],
             routes={"ui": "/pricing", "api": "/api/v1/pricing"},
+            dataset=self.dataset_card(),
             tools=self.tools(),
         )
+
+    def dataset_runtime(self) -> dict[str, Any]:
+        """SKU-weeks actually fitted, without triggering the fit."""
+        if self._df is None:
+            return {}
+        return {"rows": int(len(self._df)), "source": "generated"}
 
     def predict(self, payload: dict[str, Any]) -> Prediction:
         sku = str(payload.get("sku", "")).strip()
@@ -199,18 +209,19 @@ class PricingModule(Module):
             label=label,
             decision=decision,
             inputs={"price_low": lo_p, "price_high": hi_p},
-            meta={
-                "sku": sku,
-                "elasticity": round(e, 3),
-                "elasticity_ci": [round(ci_lo, 3), round(ci_hi, 3)],
-                "identified": bool(identified),
-                "r2": round(m.r2[sku], 4),
-                "n_obs": m.n_obs[sku],
-                "recommended_price": round(best_price, 2),
-                "observed_price_range": [round(lo_p, 2), round(hi_p, 2)],
-                "estimated_revenue_uplift": round(uplift, 4),
-                "demand_floor": floor,
-            },
+            meta=prediction_meta(
+                "pricing",
+                sku=sku,
+                elasticity=round(e, 3),
+                elasticity_ci=[round(ci_lo, 3), round(ci_hi, 3)],
+                identified=bool(identified),
+                r2=round(m.r2[sku], 4),
+                n_obs=m.n_obs[sku],
+                recommended_price=round(best_price, 2),
+                observed_price_range=[round(lo_p, 2), round(hi_p, 2)],
+                estimated_revenue_uplift=round(uplift, 4),
+                demand_floor=floor,
+            ),
         )
 
     def explain(self, payload: dict[str, Any]) -> Explanation:

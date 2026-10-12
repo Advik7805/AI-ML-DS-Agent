@@ -12,6 +12,7 @@ import threading
 from typing import Any, AsyncIterator
 
 from core.contract import Module
+from core.tenant import prediction_meta
 from core.types import AgentTool, Explanation, FeatureAttribution, MetricsReport, ModuleManifest, Prediction
 
 import pandas as pd
@@ -76,12 +77,15 @@ class FraudModule(Module):
             summary=(
                 "Streaming transaction scoring. A supervised gradient-boosted model for known "
                 "patterns plus an isolation forest for novel ones, combined by max so unseen "
-                "fraud still trips the alarm. Live feed included."
+                "fraud still trips the alarm. Live feed included. Data: Northwind Pay's card authorisation "
+                "ledger, 20,000 generated transactions at a 1.2% fraud rate, sharing customer_id "
+                "with the churn book."
             ),
             accent=ACCENT,
             status="live",
             capabilities=["classification", "anomaly-detection", "imbalance-handling", "streaming", "shap-xai"],
             routes={"ui": "/fraud", "api": "/api/v1/fraud"},
+            dataset=self.dataset_card(),
             tools=self.tools(),
         )
 
@@ -99,13 +103,14 @@ class FraudModule(Module):
             decision=decision,
             inputs={k: float(payload[k]) for k in FEATURES if payload.get(k) is not None},
             factors=[],
-            meta={
-                "threshold": bundle.threshold,
-                "supervised_score": round(float(sup), 4),
-                "unsupervised_score": round(float(unsup), 4),
-                "decisive_model": which,
-                "base_rate": round(bundle.base_rate, 5),
-            },
+            meta=prediction_meta(
+                "fraud",
+                threshold=bundle.threshold,
+                supervised_score=round(float(sup), 4),
+                unsupervised_score=round(float(unsup), 4),
+                decisive_model=which,
+                base_rate=round(bundle.base_rate, 5),
+            ),
         )
 
     def explain(self, payload: dict[str, Any]) -> Explanation:

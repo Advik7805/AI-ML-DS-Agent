@@ -1,4 +1,6 @@
-# Retention Playbook
+# Retention Playbook — Northwind Connect
+
+Owner: Customer Retention, Northwind Connect · Companion to the churn model card
 
 ## Risk bands
 - **Critical (>= 75%)**: save desk within 24 hours. Contract buyout or 6-month discounted term.

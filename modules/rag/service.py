@@ -120,6 +120,13 @@ class RagModule(Module):
 
     # --- contract ------------------------------------------------------------
 
+    def dataset_runtime(self) -> dict[str, Any]:
+        """Chunks actually indexed, including anything added this session."""
+        r = self._retriever
+        if r is None:
+            return {}
+        return {"rows": len(getattr(r, "_passages", []) or []), "source": "corpus"}
+
     @property
     def manifest(self) -> ModuleManifest:
         r = self.retriever
@@ -129,12 +136,14 @@ class RagModule(Module):
             summary=(
                 "Retrieval-augmented answers over an enterprise policy corpus. Heading-aware "
                 "chunking, TF-IDF ranking, and mandatory citations so nothing is asserted "
-                "without a source."
+                "without a source. Data: Northwind Knowledge's group policy corpus — seven shipped "
+                "documents, extendable per session with your own .md/.txt/.pdf."
             ),
             accent=ACCENT,
             status="live",
             capabilities=["retrieval", "citations", "policy-lookup", "grounded-answers"],
             routes={"ui": "/rag", "api": "/api/v1/rag"},
+            dataset=self.dataset_card(),
             tools=self.tools(),
         )
 

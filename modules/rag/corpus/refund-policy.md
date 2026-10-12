@@ -1,4 +1,6 @@
-# Refund Policy
+# Refund Policy — Northwind Global group policy
+
+Owner: Group Customer Operations · Applies to Connect, Retail and Pay
 
 ## Standard window
 Customers may request a refund within **30 days** of the invoice date for any unused service

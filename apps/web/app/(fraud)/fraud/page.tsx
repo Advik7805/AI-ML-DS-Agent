@@ -1,4 +1,5 @@
 import { BodyExplorer } from "@/components/body/BodyExplorer";
+import { ProvenanceCard } from "@/components/body/ProvenanceCard";
 import { DriftPanel } from "@/components/body/DriftPanel";
 import { FraudStream } from "@/components/fraud/FraudStream";
 
@@ -8,8 +9,19 @@ export default function Page() {
   return (
     <>
       <div className="mx-auto max-w-6xl px-5 pb-8">
-        <p className="max-w-2xl text-[15px] leading-relaxed text-ink-dim">A supervised model for the fraud you have seen, an isolation forest for the fraud you have not, combined by max. The demo stream is labelled, so the panel can show the misses and not just the catches.</p>
+        <p className="max-w-2xl text-[15px] leading-relaxed text-ink-dim">
+          <strong className="font-medium text-ink">Northwind Pay</strong>, the payments arm of Northwind
+          Global, authorises roughly 40m card transactions a day. This scores a stream drawn from
+          that ledger — 20,000 transactions, 1.2% confirmed fraudulent, sharing a customer_id key
+          space with the churn book. A supervised model catches fraud it has seen before, an
+          isolation forest catches what it has not, and the two are combined by max. The demo
+          stream is labelled, so the panel can show the misses and not just the catches.
+        </p>
       </div>
+
+      <section id="data" className="mx-auto max-w-6xl px-5 pb-10">
+        <ProvenanceCard moduleId="fraud" accent="#f43f5e" />
+      </section>
 
       <section id="board" className="mx-auto max-w-6xl scroll-mt-24 px-5 pb-10">
         <FraudStream />

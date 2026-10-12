@@ -25,6 +25,11 @@ RAW_CHURN_CSV = DATA_ROOT / "raw" / "telco_churn.csv"
 
 TARGET = "churn"
 
+#: The join key. Everything Northwind knows about a subscriber hangs off this, and it is the
+#: same key space the fraud body uses — which is what makes cross-body questions ("this
+#: customer is leaving *and* their card is being tested") answerable in SQL rather than in prose.
+CUSTOMER_KEY = "customer_id"
+
 #: Numeric features. Note we deliberately **exclude** the four ``*_charge`` columns: in this
 #: dataset charge == minutes * rate, so they are deterministic functions of the minute
 #: columns. Keeping them would give the model perfect collinearity and inflate importance.
@@ -75,6 +80,13 @@ def _coerce(df: pd.DataFrame) -> pd.DataFrame:
 
     if TARGET in df.columns:
         df[TARGET] = df[TARGET].astype(str).str.strip().str.strip('"').str.lower().map({"yes": 1, "no": 0})
+
+    # Attach the tenant key after every reshape, so a row dropped during cleaning cannot
+    # silently shift every id below it.
+    from core.tenant import customer_id
+
+    df = df.reset_index(drop=True)
+    df[CUSTOMER_KEY] = [customer_id(i) for i in range(len(df))]
 
     return df
 
@@ -163,4 +175,7 @@ def synthesize(n: int = 3333, seed: int = 42) -> pd.DataFrame:
     df["total_eve_charge"] = np.round(df["total_eve_minutes"] * 0.085, 2)
     df["total_night_charge"] = np.round(df["total_night_minutes"] * 0.045, 2)
     df["total_intl_charge"] = np.round(df["total_intl_minutes"] * 0.27, 2)
+    from core.tenant import customer_id
+
+    df[CUSTOMER_KEY] = [customer_id(i) for i in range(len(df))]
     return df

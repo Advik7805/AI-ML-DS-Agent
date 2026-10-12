@@ -21,6 +21,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import GroupKFold
 
 from core.contract import Module
+from core.tenant import prediction_meta
 from core.types import AgentTool, Explanation, FeatureAttribution, MetricsReport, ModuleManifest, Prediction
 
 from .data import FEATURES, RUL_CAP, SENSORS, SETTINGS, load_cmapss, synthesize
@@ -37,6 +38,8 @@ class RulModel:
     metrics: dict[str, float] = field(default_factory=dict)
     source: str = "synthetic"
     trained_at: str = ""
+    #: Full source-frame size, so the provenance card can report rows read, not just rows fitted.
+    n_rows: int = 0
     notes: list[str] = field(default_factory=list)
     #: Training distribution per feature, so incoming telemetry can be checked for drift.
     reference: dict = field(default_factory=dict)
@@ -123,6 +126,7 @@ def train_rul(*, random_state: int = 11) -> tuple[RulModel, MetricsReport]:
         metrics=scores,
         source=source,
         trained_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        n_rows=len(df),
         notes=notes,
         reference={c: np.asarray(X[c].values, dtype=float) for c in feature_cols},
     )
@@ -180,12 +184,15 @@ class MaintenanceModule(Module):
             summary=(
                 "Remaining-useful-life regression on turbofan sensor telemetry, cross-validated "
                 "by engine so the error is measured on hardware the model never saw. Error is "
-                "reported per remaining-life band, because overall RMSE hides where it fails."
+                "reported per remaining-life band, because overall RMSE hides where it fails. Data: Northwind "
+                "Industrial's engine telemetry — NASA CMAPSS FD001 (100 engines, 20,631 cycles), or a "
+                "schema-compatible generator when the file is absent."
             ),
             accent=ACCENT,
             status="live",
             capabilities=["regression", "time-series", "grouped-cv", "shap-xai"],
             routes={"ui": "/maintenance", "api": "/api/v1/maintenance"},
+            dataset=self.dataset_card(),
             tools=self.tools(),
         )
 
@@ -211,7 +218,13 @@ class MaintenanceModule(Module):
             decision=decision,
             inputs={k: float(payload[k]) for k in bundle.feature_names if payload.get(k) is not None},
             factors=self._drivers(payload),
-            meta={"rul_cycles": round(rul, 1), "rul_cap": RUL_CAP, "source": bundle.source},
+            meta=prediction_meta(
+                "maintenance",
+                rul_cycles=round(rul, 1),
+                rul_cap=RUL_CAP,
+                source=bundle.source,
+                asset_id=f"NW-E-{int(payload.get('unit', 0)):03d}" if payload.get("unit") else None,
+            ),
         )
 
     def _drivers(self, payload: dict[str, Any], k: int = 5) -> list[FeatureAttribution]:

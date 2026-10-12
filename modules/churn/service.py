@@ -14,6 +14,7 @@ import threading
 from typing import Any
 
 from core.contract import Module
+from core.tenant import prediction_meta
 from core.types import AgentTool, Explanation, FeatureAttribution, MetricsReport, ModuleManifest, Prediction
 
 from .data import FEATURES, TARGET, load_telco
@@ -80,12 +81,15 @@ class ChurnModule(Module):
             summary=(
                 "Gradient-boosted churn scoring with SMOTE for class imbalance, isotonic "
                 "calibration, and SHAP explanations. Ranks an entire book of business by "
-                "attrition risk and recommends a retention action per customer."
+                "attrition risk and recommends a retention action per customer. Data: Northwind Connect's "
+                "subscriber billing extract — the public IBM Telco Customer Churn set, 3,333 rows, "
+                "keyed by customer_id and joined to the fraud body."
             ),
             accent=ACCENT,
             status="live",
             capabilities=["classification", "imbalance-handling", "calibration", "shap-xai", "ranking"],
             routes={"ui": "/churn", "api": "/api/v1/churn"},
+            dataset=self.dataset_card(),
             tools=self.tools(),
         )
 
@@ -109,12 +113,14 @@ class ChurnModule(Module):
             inputs={k: float(payload[k]) for k in FEATURES if payload.get(k) is not None},
             factors=factors,
             explanation=explanation,
-            meta={
-                "threshold": bundle.threshold,
-                "base_rate": round(bundle.base_rate, 4),
-                "model_source": bundle.source,
-                "trained_at": bundle.trained_at,
-            },
+            meta=prediction_meta(
+                "churn",
+                threshold=bundle.threshold,
+                base_rate=round(bundle.base_rate, 4),
+                model_source=bundle.source,
+                trained_at=bundle.trained_at,
+                customer_id=payload.get("customer_id"),
+            ),
         )
 
     def explain(self, payload: dict[str, Any]) -> Explanation:
@@ -212,6 +218,7 @@ class ChurnModule(Module):
             out.append(
                 {
                     "row_index": int(idx),
+                    "customer_id": str(row.get("customer_id", "")),
                     "state": str(row.get("state", "")),
                     "score": round(score, 4),
                     "label": pred.label,
@@ -226,6 +233,10 @@ class ChurnModule(Module):
             "n_returned": len(out),
             "n_scored": int(len(df)),
             "data_source": source,
+            "tenant": "Northwind Global",
+            "business_unit": "Northwind Connect",
+            "dataset": "Subscriber billing & behaviour extract (IBM Telco Customer Churn, 3,333 rows)",
+            "join_key": "customer_id",
             "threshold": bundle.threshold,
             "customers": out,
         }

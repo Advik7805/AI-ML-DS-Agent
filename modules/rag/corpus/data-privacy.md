@@ -1,4 +1,6 @@
-# Data Privacy
+# Data Privacy — Northwind Global group policy
+
+Owner: Group Privacy Office · Applies to all business units
 
 ## Personal data
 Customer usage records are personal data. They may be used for churn scoring and service

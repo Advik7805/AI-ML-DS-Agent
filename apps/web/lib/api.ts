@@ -11,7 +11,7 @@
  *   makes the sandbox preview host work, and it removes CORS from the picture entirely.
  */
 
-import type { Explanation, MetricsReport, ModuleManifest, Prediction } from "./types";
+import type { DatasetCard, Explanation, MetricsReport, ModuleManifest, Prediction, Tenant } from "./types";
 
 const API_ORIGIN = process.env.API_ORIGIN ?? "http://127.0.0.1:8000";
 
@@ -53,6 +53,17 @@ export const getModule = (id: string, server = true) =>
 
 export const getMetrics = (id: string, server = true) =>
   (server ? serverFetch : clientFetch)<MetricsReport>(`/api/v1/modules/${id}/metrics`);
+
+export const getDataset = (id: string, server = true) =>
+  (server ? serverFetch : clientFetch)<DatasetCard>(`/api/v1/modules/${id}/dataset`);
+
+export interface TenantResponse {
+  tenant: Tenant;
+  bodies: Array<{ id: string; dataset: DatasetCard }>;
+}
+
+export const getTenant = (server = true) =>
+  (server ? serverFetch : clientFetch)<TenantResponse>("/api/v1/tenant");
 
 export async function predict(
   id: string,

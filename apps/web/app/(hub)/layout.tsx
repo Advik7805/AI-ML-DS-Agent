@@ -49,6 +49,12 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
 
           <nav className="flex items-center gap-1 text-[13px]">
             <Link
+              href="#tenant"
+              className="rounded-lg px-3 py-1.5 text-ink-dim transition hover:bg-white/5 hover:text-ink"
+            >
+              The company
+            </Link>
+            <Link
               href="#bodies"
               className="rounded-lg px-3 py-1.5 text-ink-dim transition hover:bg-white/5 hover:text-ink"
             >

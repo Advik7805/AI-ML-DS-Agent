@@ -4,6 +4,7 @@ import { AgentChat } from "@/components/hub/AgentChat";
 import { IntegrationsPanel } from "@/components/hub/IntegrationsPanel";
 import { RunLog } from "@/components/hub/RunLog";
 import { ModuleGraph } from "@/components/hub/ModuleGraph";
+import { TenantPanel } from "@/components/hub/TenantPanel";
 import { getModules } from "@/lib/api";
 import type { ModuleManifest } from "@/lib/types";
 import { KNOWN_BODIES } from "@/lib/types";
@@ -63,14 +64,20 @@ export default async function HubPage() {
               Many independent bodies.
             </span>
           </h1>
-          <p className="mx-auto mt-6 max-w-xl text-[15px] leading-relaxed text-ink-dim">
-            The senior data scientist&rsquo;s toolchain assembled into one connected product —
-            retrieval, streaming anomaly detection, forecasting, explainable AI, pricing and
-            churn — reachable through a single agent that can call any of them.
+          <p className="mx-auto mt-6 max-w-2xl text-[15px] leading-relaxed text-ink-dim">
+            Ask in plain English, or drop in your own CSV, PDF or text file — Saros scores churn,
+            flags fraud transaction by transaction, forecasts which engine fails next, prices SKUs
+            and answers policy questions, then explains every decision with cited evidence. All
+            seven tools run on one fictional company&rsquo;s data, so the numbers connect instead of
+            floating free.
           </p>
         </div>
 
         <ModuleGraph live={modules} />
+
+        <div id="tenant" className="mx-auto mt-10 max-w-6xl scroll-mt-24">
+          <TenantPanel modules={modules} />
+        </div>
 
         {error && (
           <div className="mx-auto mt-2 max-w-xl rounded-xl border border-churn/30 bg-churn/5 px-4 py-3 text-center text-xs text-churn">

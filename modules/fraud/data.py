@@ -28,6 +28,16 @@ FEATURES: tuple[str, ...] = (
 
 TARGET = "is_fraud"
 
+#: Northwind Pay's ledger keys. ``customer_id`` is deliberately drawn from the *same* space as
+#: the churn book (Northwind has ~3,333 subscription customers; cardholders are those same
+#: people), so the two bodies join. That is a design decision, not a coincidence, and it is why
+#: the hub agent can answer a question that spans retention and fraud in one call.
+AUTH_KEY = "auth_id"
+CUSTOMER_KEY = "customer_id"
+
+#: Size of the shared customer base — matches modules/churn's postal extract.
+CUSTOMER_BASE = 3333
+
 
 def synthesize(n: int = 20000, fraud_rate: float = 0.012, seed: int = 7) -> pd.DataFrame:
     """Generate a transaction stream that is genuinely hard to separate.
@@ -133,7 +143,15 @@ def synthesize(n: int = 20000, fraud_rate: float = 0.012, seed: int = 7) -> pd.D
             TARGET: is_fraud,
         }
     )
-    return df.sample(frac=1.0, random_state=seed).reset_index(drop=True)
+    df = df.sample(frac=1.0, random_state=seed).reset_index(drop=True)
+
+    from core.tenant import auth_id, customer_id
+
+    df[AUTH_KEY] = [auth_id(i) for i in range(len(df))]
+    # Cardholders are the same people as the subscribers in the churn book: same key space,
+    # so a churn score and this person's authorisations can be joined on customer_id.
+    df[CUSTOMER_KEY] = [customer_id(i % CUSTOMER_BASE) for i in range(len(df))]
+    return df
 
 
 def amount_anomaly_ratio(df: pd.DataFrame) -> float:

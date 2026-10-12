@@ -48,6 +48,44 @@ export interface AgentTool {
   module_id: string;
 }
 
+/** Mirror of `core.types.DatasetCard` — where a body's numbers come from and whose they are. */
+export interface DatasetCard {
+  module_id: string;
+  company: string;
+  company_note: string;
+  business_unit: string;
+  dataset: string;
+  grain: string;
+  key: string;
+  target: string;
+  period: string;
+  origin: "public-dataset" | "generated" | "corpus" | "uploaded" | "none";
+  origin_detail: string;
+  origin_url: string;
+  file: string;
+  rows: number | null;
+  observed_rows: number | null;
+  observed_source: string;
+  observed_basis: string;
+  system_of_record: string;
+  why: string;
+  connect: string;
+  caveats: string[];
+}
+
+export interface Tenant {
+  id: string;
+  name: string;
+  legal_name: string;
+  tagline: string;
+  founded: string;
+  hq: string;
+  headcount: string;
+  revenue: string;
+  why_fictional: string;
+  units: Record<string, string>;
+}
+
 export interface ModuleManifest {
   id: string;
   title: string;
@@ -58,6 +96,7 @@ export interface ModuleManifest {
   capabilities: string[];
   routes: Record<string, string>;
   tools: AgentTool[];
+  dataset: DatasetCard | null;
 }
 
 export interface MetricsReport {
@@ -149,3 +188,81 @@ export const KNOWN_BODIES: Array<{
     href: "/diagnostics",
   },
 ];
+
+/**
+ * Offline provenance mirror.
+ *
+ * Same rule as KNOWN_BODIES: the API is the source of truth and wins whenever it answers, but
+ * a free-tier backend sleeps — and a body page that goes blank, or worse, quietly drops the
+ * "where did these numbers come from" panel, is the failure this project exists to avoid. So
+ * the minimum set needed to keep the claim honest is mirrored here: who, what dataset, real or
+ * generated, how many rows.
+ */
+export const KNOWN_TENANT = {
+  name: "Northwind Global",
+  tagline: "A fictional multinational, used as one consistent tenant across all seven bodies.",
+  hq: "Rotterdam · Singapore · Austin",
+  headcount: "48,000",
+};
+
+export const KNOWN_DATASETS: Record<
+  string,
+  { unit: string; dataset: string; origin: DatasetCard["origin"]; rows: number | null; key: string; target: string }
+> = {
+  churn: {
+    unit: "Northwind Connect",
+    dataset: "Subscriber billing & behaviour extract",
+    origin: "public-dataset",
+    rows: 3333,
+    key: "customer_id",
+    target: "churn within 30 days",
+  },
+  fraud: {
+    unit: "Northwind Pay",
+    dataset: "Card authorisation ledger",
+    origin: "generated",
+    rows: 20000,
+    key: "auth_id + customer_id",
+    target: "confirmed fraudulent authorisation",
+  },
+  maintenance: {
+    unit: "Northwind Industrial",
+    dataset: "Engine telemetry (NASA CMAPSS-shaped)",
+    origin: "public-dataset",
+    rows: 20631,
+    key: "unit + cycle",
+    target: "remaining useful life in cycles",
+  },
+  pricing: {
+    unit: "Northwind Retail",
+    dataset: "Point-of-sale demand history",
+    origin: "generated",
+    rows: 9600,
+    key: "sku",
+    target: "units sold (elasticity)",
+  },
+  rag: {
+    unit: "Northwind Knowledge",
+    dataset: "Group policy & procedure corpus",
+    origin: "corpus",
+    rows: null,
+    key: "source file + heading",
+    target: "cited policy answers",
+  },
+  scraper: {
+    unit: "Northwind Labs",
+    dataset: "Public web pages (competitive price intel)",
+    origin: "none",
+    rows: null,
+    key: "url + timestamp",
+    target: "acquired text for the other bodies",
+  },
+  xai_health: {
+    unit: "Northwind Care",
+    dataset: "Employee health screening pilot",
+    origin: "public-dataset",
+    rows: 768,
+    key: "screening_id",
+    target: "diabetes screening risk",
+  },
+};

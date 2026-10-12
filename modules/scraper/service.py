@@ -155,12 +155,14 @@ class ScraperModule(Module):
             summary=(
                 "Turns a URL into structured text the other bodies can consume. Host-allowlisted "
                 "and size-capped so the agent cannot be talked into hammering a site. Mocked by "
-                "default; Firecrawl is the production backend."
+                "default; Firecrawl is the production backend. Data: none — Northwind Labs fetches public "
+                "pages on demand; the mock is labelled everywhere it appears."
             ),
             accent=ACCENT,
             status="live",
             capabilities=["acquisition", "html-to-text", "allowlist", "mockable"],
             routes={"ui": "/scraper", "api": "/api/v1/scraper"},
+            dataset=self.dataset_card(),
             tools=self.tools(),
         )
 

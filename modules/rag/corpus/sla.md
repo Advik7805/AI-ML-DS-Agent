@@ -1,4 +1,6 @@
-# Service Level Agreement
+# Service Level Agreement — Northwind Connect
+
+Owner: Group Service Management · Applies to enterprise connectivity contracts
 
 ## Uptime
 Enterprise tier commits to **99.95% monthly availability**, measured at the edge, excluding

@@ -63,6 +63,8 @@ class ChurnModel:
     source: str = "synthetic"
     trained_at: str = ""
     n_train: int = 0
+    #: Full source-frame size, so the provenance card can report rows read rather than rows fitted.
+    n_rows: int = 0
     base_rate: float = 0.0
     notes: list[str] = field(default_factory=list)
 
@@ -251,6 +253,7 @@ def train_churn(
         source=source,
         trained_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         n_train=len(X_tr),
+        n_rows=len(df),
         base_rate=float(y.mean()),
         notes=notes,
     )

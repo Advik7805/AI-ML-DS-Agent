@@ -23,7 +23,14 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Callable
 from typing import Any
 
-from core.types import AgentTool, Explanation, MetricsReport, ModuleManifest, Prediction
+from core.types import (
+    AgentTool,
+    DatasetCard,
+    Explanation,
+    MetricsReport,
+    ModuleManifest,
+    Prediction,
+)
 
 
 class Module(ABC):
@@ -81,6 +88,45 @@ class Module(ABC):
     @abstractmethod
     def manifest(self) -> ModuleManifest:
         """Static description the hub renders as a tile and uses for routing."""
+
+    def dataset_card(self) -> DatasetCard:
+        """Provenance for this body's data: company, file, rows, key, caveats.
+
+        Defaults to the tenant registry entry, enriched with anything the body has actually
+        observed. A body with a real dataset overrides only the observed part, so a card can
+        never silently disagree with the data that was loaded.
+        """
+        from core.tenant import dataset_for
+
+        return dataset_for(self.id, **self.dataset_runtime())
+
+    def dataset_runtime(self) -> dict[str, Any]:
+        """What this body has observed so far, read from state that is *already* loaded.
+
+        Deliberately never triggers a load or a train: this runs while a manifest is being
+        built, and a manifest call that trains a model would make the hub's tiles slow. A body
+        that has not touched its data yet simply reports the shipped expectation from the
+        registry, which is the honest answer at that point.
+        """
+        bundle = getattr(self, "_bundle", None)
+        if bundle is None:
+            return {}
+        out: dict[str, Any] = {}
+        rows = getattr(bundle, "n_rows", None)
+        basis = "full source frame"
+        if not rows:
+            # An artifact trained before n_rows existed, or a body that only keeps its fit set.
+            # Report it — but say what it is, rather than passing a training split off as a
+            # row count for the whole dataset.
+            rows = getattr(bundle, "n_train", None)
+            basis = "training split"
+        source = getattr(bundle, "source", None)
+        if rows:
+            out["rows"] = int(rows)
+            out["basis"] = basis
+        if source:
+            out["source"] = str(source)
+        return out
 
     @abstractmethod
     def predict(self, payload: dict[str, Any]) -> Prediction:

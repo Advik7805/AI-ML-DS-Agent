@@ -1,6 +1,7 @@
 import { getMetrics } from "@/lib/api";
 import type { MetricsReport } from "@/lib/types";
 
+import { ProvenanceCard } from "@/components/body/ProvenanceCard";
 import { Portfolio } from "@/components/churn/Portfolio";
 import { Scorer } from "@/components/churn/Scorer";
 
@@ -29,11 +30,19 @@ export default async function ChurnPage() {
           Score every customer&rsquo;s churn risk, and know exactly why.
         </h1>
         <p className="mt-5 max-w-2xl text-[15px] leading-relaxed text-ink-dim">
-          Gradient-boosted classification on the 3,333-row telecom churn dataset. SMOTE handles
-          the {metrics ? `${(metrics.positive_rate * 100).toFixed(1)}%` : "~14.5%"} minority
-          class, a sigmoid map calibrates the probabilities, the operating threshold is chosen
-          by F1 on a reserved fold — and every prediction ships with its SHAP drivers.
+          <strong className="font-medium text-ink">Northwind Connect</strong> — the telecom arm of
+          Northwind Global — runs 3.3m broadband and mobile subscriptions. This scores its subscriber
+          book: gradient-boosted classification on the 3,333-row billing extract (the public IBM
+          Telco Customer Churn set). SMOTE handles the{" "}
+          {metrics ? `${(metrics.positive_rate * 100).toFixed(1)}%` : "~14.5%"} minority class, a
+          sigmoid map calibrates the probabilities, the operating threshold is chosen by F1 on a
+          reserved fold — and every prediction ships with its SHAP drivers and the customer_id the
+          rest of the platform joins on.
         </p>
+      </section>
+
+      <section id="data" className="scroll-mt-24 pb-10">
+        <ProvenanceCard moduleId="churn" accent="#f59e0b" />
       </section>
 
       {/* --- model card ----------------------------------------------------- */}

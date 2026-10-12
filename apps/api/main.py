@@ -23,7 +23,7 @@ from core.agent.graph import HubAgent
 from core.agent.providers import Message, get_provider
 from core.contract import ModuleRegistry
 from core.integrations.ratelimit import get_limiter
-from core.types import Explanation, MetricsReport, ModuleManifest, Prediction
+from core.types import DatasetCard, Explanation, MetricsReport, ModuleManifest, Prediction
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -150,6 +150,37 @@ def get_module(module_id: str) -> ModuleManifest:
         return registry.get(module_id).manifest
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from None
+
+
+@app.get("/api/v1/modules/{module_id}/dataset", response_model=DatasetCard)
+def module_dataset(module_id: str) -> DatasetCard:
+    """Where this body's numbers come from: company, unit, file, rows, key, caveats.
+
+    Every body answers this. A model that cannot say what it was trained on has no business
+    making a decision, so the provenance is an endpoint rather than a paragraph in a README.
+    """
+    try:
+        return registry.get(module_id).dataset_card()
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from None
+
+
+@app.get("/api/v1/tenant")
+def tenant() -> dict[str, Any]:
+    """The single company every body belongs to, plus each body's dataset card.
+
+    This is the "so what is this, actually?" answer: one page naming the tenant, its business
+    units, and which dataset sits behind each body — including which of them are real public
+    datasets and which are generated, because those are different claims.
+    """
+    from core.tenant import TENANT
+
+    return {
+        "tenant": TENANT,
+        "bodies": [
+            {"id": m.id, "dataset": m.dataset_card().model_dump()} for m in registry.all()
+        ],
+    }
 
 
 # --- per-body endpoints (generic — no module-specific code) -------------------

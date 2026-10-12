@@ -34,6 +34,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 
 from core.contract import Module
+from core.tenant import prediction_meta
 from core.types import AgentTool, Explanation, FeatureAttribution, MetricsReport, ModuleManifest, Prediction
 
 from .data import FEATURES, TARGET, load_diabetes
@@ -51,6 +52,8 @@ class HealthModel:
     metrics: dict[str, float] = field(default_factory=dict)
     source: str = "synthetic"
     trained_at: str = ""
+    #: Full source-frame size, for the provenance card.
+    n_rows: int = 0
     notes: list[str] = field(default_factory=list)
 
     def frame(self, payload: dict[str, Any]) -> pd.DataFrame:
@@ -114,6 +117,7 @@ def train_health(*, random_state: int = 5) -> tuple[HealthModel, MetricsReport]:
         feature_names=list(FEATURES),
         source=source,
         trained_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        n_rows=len(df),
         notes=notes,
     )
 
@@ -234,12 +238,15 @@ class XaiHealthModule(Module):
             summary=(
                 "Diabetes risk scoring with per-patient SHAP explanations and a Fairlearn group "
                 "fairness audit. Optimises for false-negative rate, because in screening a "
-                "missed diagnosis is the harm that matters."
+                "missed diagnosis is the harm that matters. Data: Northwind Care's employee screening pilot "
+                "— the public Pima Indians Diabetes study, 768 records, with a Fairlearn group audit "
+                "because the decision is clinical."
             ),
             accent=ACCENT,
             status="live",
             capabilities=["classification", "shap-xai", "fairness-audit", "imputation"],
             routes={"ui": "/diagnostics", "api": "/api/v1/xai_health"},
+            dataset=self.dataset_card(),
             tools=self.tools(),
         )
 
@@ -264,11 +271,12 @@ class XaiHealthModule(Module):
             inputs={k: float(payload[k]) for k in bundle.feature_names if payload.get(k) is not None},
             factors=factors,
             explanation=explanation,
-            meta={
-                "threshold": bundle.threshold,
-                "source": bundle.source,
-                "warning": "Decision support only. Not a diagnostic device.",
-            },
+            meta=prediction_meta(
+                "xai_health",
+                threshold=bundle.threshold,
+                source=bundle.source,
+                warning="Decision support only. Not a diagnostic device.",
+            ),
         )
 
     def _safe_explain(self, payload: dict[str, Any]) -> Explanation | None:
