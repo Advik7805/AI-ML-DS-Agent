@@ -11,6 +11,7 @@
 import { motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { WakeRetry } from "@/components/body/WakeRetry";
 import { explain, predict } from "@/lib/api";
 import type { Explanation, Prediction } from "@/lib/types";
 
@@ -187,11 +188,8 @@ export function Scorer() {
             </div>
           )}
 
-          {error && (
-            <div className="mt-4 rounded-lg border border-line bg-void-3 p-3 text-[12px] text-ink-dim">
-              {error}
-            </div>
-          )}
+          {busy && <p role="status" className="mt-3 text-[11px] text-ink-faint">Scoring this profile and preparing its explanation…</p>}
+          {error && <div className="mt-4"><WakeRetry error={error} onRetry={() => void run(values)} busy={busy} label="Retry score" /></div>}
         </div>
 
         {/* --- explanation --------------------------------------------------- */}

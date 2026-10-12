@@ -10,8 +10,9 @@
  */
 
 import { motion } from "motion/react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
+import { WakeRetry } from "@/components/body/WakeRetry";
 import { clientFetch } from "@/lib/api";
 
 interface Hit {
@@ -70,18 +71,31 @@ export function KnowledgeSearch() {
   const [query, setQuery] = useState("");
   const [res, setRes] = useState<SearchResult | null>(null);
   const [sources, setSources] = useState<Sources | null>(null);
+  const [sourcesBusy, setSourcesBusy] = useState(true);
+  const [sourcesError, setSourcesError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    clientFetch<{ result: Sources }>("/api/v1/agent/tools/list_knowledge_sources", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ arguments: {} }),
-    })
-      .then((r) => setSources(r.result))
-      .catch(() => setSources(null));
+  const loadSources = useCallback(async () => {
+    setSourcesBusy(true);
+    setSourcesError(null);
+    try {
+      const response = await clientFetch<{ result: Sources }>("/api/v1/agent/tools/list_knowledge_sources", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ arguments: {} }),
+      });
+      setSources(response.result);
+    } catch (reason) {
+      setSourcesError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setSourcesBusy(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void loadSources();
+  }, [loadSources]);
 
   async function run(q: string) {
     const text = q.trim();
@@ -145,11 +159,8 @@ export function KnowledgeSearch() {
           </div>
         )}
 
-        {error && (
-          <div className="mt-4 rounded-xl border border-line bg-void-3 p-4 text-[12.5px] text-ink-dim">
-            {error}
-          </div>
-        )}
+        {busy && <p role="status" className="mt-3 text-[11px] text-ink-faint">Searching the index and ranking source passages…</p>}
+        {error && <div className="mt-4"><WakeRetry error={error} onRetry={() => void run(query)} busy={busy} label="Retry search" /></div>}
 
         {res && v && (
           <div className="mt-5">
@@ -205,6 +216,8 @@ export function KnowledgeSearch() {
       </div>
 
       <div className="space-y-3">
+        {sourcesError && <WakeRetry error={`Knowledge sources unavailable: ${sourcesError}`} onRetry={() => void loadSources()} busy={sourcesBusy} label="Retry sources" />}
+        {sourcesBusy && !sources && <p role="status" className="rounded-xl border border-line bg-void-2 p-4 text-[11px] text-ink-faint">Waking the API and loading indexed sources…</p>}
         {sources && (
           <div className="rounded-2xl border border-line bg-void-2 p-5 shadow-sm">
             <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-ink-faint">

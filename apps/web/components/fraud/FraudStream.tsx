@@ -12,6 +12,7 @@
 import { motion } from "motion/react";
 import { useCallback, useEffect, useState } from "react";
 
+import { WakeRetry } from "@/components/body/WakeRetry";
 import { clientFetch } from "@/lib/api";
 
 interface Flagged {
@@ -47,6 +48,7 @@ export function FraudStream() {
 
   const load = useCallback(() => {
     setBusy(true);
+    setError(null);
     clientFetch<{ result: StreamSummary }>("/api/v1/agent/tools/summarise_fraud_stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -59,12 +61,7 @@ export function FraudStream() {
 
   useEffect(load, [load]);
 
-  if (error)
-    return (
-      <div className="rounded-2xl border border-line bg-void-3 p-6 text-[13px] text-ink-dim">
-        Stream unavailable: {error}
-      </div>
-    );
+  if (error) return <WakeRetry error={`Stream unavailable: ${error}`} onRetry={load} busy={busy} label="Retry stream" />;
 
   if (!data)
     return (
@@ -91,6 +88,7 @@ export function FraudStream() {
           </button>
         </div>
 
+        {busy && <p role="status" className="mt-3 text-[11px] text-ink-faint">Scoring transactions through the fraud ensemble…</p>}
         <div className="mt-4 space-y-1.5">
           {data.top_flagged.map((t, i) => (
             <motion.div

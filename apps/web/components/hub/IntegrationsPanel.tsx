@@ -12,8 +12,9 @@
  */
 
 import { motion } from "motion/react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
+import { WakeRetry } from "@/components/body/WakeRetry";
 import { clientFetch } from "@/lib/api";
 
 interface Integration {
@@ -40,21 +41,27 @@ interface Summary {
 export function IntegrationsPanel() {
   const [data, setData] = useState<Summary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(true);
 
-  useEffect(() => {
-    clientFetch<Summary>("/api/v1/integrations")
-      .then(setData)
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+  const load = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      setData(await clientFetch<Summary>("/api/v1/integrations"));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setBusy(false);
+    }
   }, []);
 
-  if (error)
-    return (
-      <div className="glass rounded-2xl p-5 text-[12.5px] text-ink-faint">
-        Integration status unavailable: {error}
-      </div>
-    );
+  useEffect(() => {
+    void load();
+  }, [load]);
 
-  if (!data) return <div className="glass animate-pulse rounded-2xl p-5 text-[12.5px] text-ink-faint">Reading configuration…</div>;
+  if (error) return <WakeRetry error={`Integration status unavailable: ${error}`} onRetry={() => void load()} busy={busy} label="Retry status" />;
+
+  if (!data) return <div role="status" className="glass animate-pulse rounded-2xl p-5 text-[12.5px] text-ink-faint">Waking the API and reading configuration…</div>;
 
   const live = data.integrations.filter((i) => i.enabled);
   const mocked = data.integrations.filter((i) => !i.enabled);

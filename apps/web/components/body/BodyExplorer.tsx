@@ -13,6 +13,7 @@ import { motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { clientFetch } from "@/lib/api";
+import { WakeRetry } from "@/components/body/WakeRetry";
 import type { AgentTool, Explanation, MetricsReport, ModuleManifest, Prediction } from "@/lib/types";
 
 interface Props {
@@ -35,8 +36,17 @@ function sampleValue(schema: Json): any {
   return null;
 }
 
+function defaultArgs(tool: AgentTool): Json {
+  const props = (tool.parameters_schema?.properties ?? {}) as Json;
+  const out: Json = {};
+  for (const [key, value] of Object.entries(props)) out[key] = sampleValue(value as Json);
+  return out;
+}
+
 export function BodyExplorer({ moduleId, accent }: Props) {
   const [manifest, setManifest] = useState<ModuleManifest | null>(null);
+  const [manifestBusy, setManifestBusy] = useState(true);
+  const [manifestError, setManifestError] = useState<string | null>(null);
   const [metrics, setMetrics] = useState<MetricsReport | null>(null);
   const [metricsError, setMetricsError] = useState<string | null>(null);
   const [toolName, setToolName] = useState<string>("");
@@ -48,36 +58,48 @@ export function BodyExplorer({ moduleId, accent }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [raw, setRaw] = useState<string>("");
 
-  useEffect(() => {
-    clientFetch<ModuleManifest>(`/api/v1/modules/${moduleId}`)
-      .then((m) => {
-        setManifest(m);
-        // Default to the first tool that takes structured input, so the console opens useful.
-        const primary =
-          m.tools.find((t) => Object.keys(t.parameters_schema?.properties ?? {}).length > 3) ?? m.tools[0];
-        if (primary) {
-          setToolName(primary.name);
-          setArgs(defaultArgs(primary));
-        }
-      })
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
-
-    clientFetch<MetricsReport>(`/api/v1/modules/${moduleId}/metrics`)
-      .then(setMetrics)
-      .catch((e) => setMetricsError(e instanceof Error ? e.message : String(e)));
+  const loadManifest = useCallback(async () => {
+    setManifestBusy(true);
+    setManifestError(null);
+    setManifest(null);
+    setToolName("");
+    setArgs({});
+    try {
+      const loaded = await clientFetch<ModuleManifest>(`/api/v1/modules/${moduleId}`);
+      setManifest(loaded);
+      // Prefer a structured, useful tool; fall back to the first manifest entry.
+      const primary =
+        loaded.tools.find((item) => Object.keys(item.parameters_schema?.properties ?? {}).length > 3) ??
+        loaded.tools[0];
+      if (primary) {
+        setToolName(primary.name);
+        setArgs(defaultArgs(primary));
+      }
+    } catch (reason) {
+      setManifestError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setManifestBusy(false);
+    }
   }, [moduleId]);
+
+  const loadMetrics = useCallback(async () => {
+    setMetricsError(null);
+    try {
+      setMetrics(await clientFetch<MetricsReport>(`/api/v1/modules/${moduleId}/metrics`));
+    } catch (reason) {
+      setMetricsError(reason instanceof Error ? reason.message : String(reason));
+    }
+  }, [moduleId]);
+
+  useEffect(() => {
+    void loadManifest();
+    void loadMetrics();
+  }, [loadManifest, loadMetrics]);
 
   const tool = useMemo(
     () => manifest?.tools.find((t) => t.name === toolName) ?? null,
     [manifest, toolName],
   );
-
-  function defaultArgs(t: AgentTool): Json {
-    const props = (t.parameters_schema?.properties ?? {}) as Json;
-    const out: Json = {};
-    for (const [k, v] of Object.entries(props)) out[k] = sampleValue(v as Json);
-    return out;
-  }
 
   const run = useCallback(async () => {
     if (!tool) return;
@@ -123,6 +145,17 @@ export function BodyExplorer({ moduleId, accent }: Props) {
 
   return (
     <div className="mx-auto max-w-6xl px-5 pb-16">
+      {manifestBusy && (
+        <div role="status" aria-live="polite" className="mb-5 rounded-xl border border-line bg-void-2 p-4 text-[12px] text-ink-dim">
+          Waking the body API and loading its tool manifest…
+        </div>
+      )}
+      {manifestError && (
+        <div className="mb-5">
+          <WakeRetry error={manifestError} onRetry={() => void loadManifest()} busy={manifestBusy} label="Retry manifest" />
+        </div>
+      )}
+
       {/* --- summary + metrics ------------------------------------------- */}
       {manifest && (
         <section id="model" className="scroll-mt-24 pb-8">
@@ -201,8 +234,8 @@ export function BodyExplorer({ moduleId, accent }: Props) {
           )}
 
           {metricsError && (
-            <div className="mt-3 rounded-xl border border-line bg-void-3 p-4 text-[12.5px] text-ink-dim">
-              Model card unavailable: {metricsError}. The console below still works.
+            <div className="mt-3">
+              <WakeRetry error={`Model card unavailable: ${metricsError}`} onRetry={() => void loadMetrics()} label="Retry metrics" />
             </div>
           )}
         </section>
@@ -215,6 +248,7 @@ export function BodyExplorer({ moduleId, accent }: Props) {
             <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-ink-faint">Tool</div>
             <select
               value={toolName}
+              disabled={!manifest || manifestBusy}
               onChange={(e) => {
                 const t = manifest?.tools.find((x) => x.name === e.target.value);
                 setToolName(e.target.value);
@@ -223,6 +257,8 @@ export function BodyExplorer({ moduleId, accent }: Props) {
               className="mt-1.5 w-full rounded-md border border-line bg-void-2 px-2.5 py-1.5 font-mono text-[12px] text-ink"
               style={{ colorScheme: "dark" }}
             >
+              {!manifest && <option value="">{manifestBusy ? "Loading manifest…" : "Manifest unavailable"}</option>}
+              {manifest?.tools.length === 0 && <option value="">No tools registered</option>}
               {(manifest?.tools ?? []).map((t) => (
                 <option key={t.name} value={t.name}>
                   {t.name}
@@ -257,23 +293,24 @@ export function BodyExplorer({ moduleId, accent }: Props) {
 
             <button
               onClick={run}
-              disabled={busy}
+              disabled={!tool || busy}
               className="mt-4 w-full rounded-lg py-2 text-[13px] font-medium text-white transition disabled:opacity-50"
               style={{ background: accent }}
             >
-              {busy ? "Running…" : "Run tool"}
+              {busy ? "Waiting for result…" : "Run tool"}
             </button>
+            {busy && (
+              <p role="status" aria-live="polite" className="mt-2 text-center text-[10.5px] leading-relaxed text-ink-faint">
+                Running {tool?.name}. On a sleeping free-tier API, the first response may take a minute.
+              </p>
+            )}
             <p className="mt-2 text-center font-mono text-[10px] text-ink-faint">
               POST /api/v1/agent/tools/{toolName}
             </p>
           </div>
 
           <div className="space-y-4">
-            {error && (
-              <div className="rounded-xl border border-line bg-void-3 p-4 text-[12.5px] text-ink-dim">
-                {error}
-              </div>
-            )}
+            {error && <WakeRetry error={error} onRetry={() => void run()} busy={busy} label="Retry tool" />}
 
             {prediction && (
               <div className="rounded-2xl border border-line bg-void-2 p-5 shadow-sm">

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { WakeRetry } from "@/components/body/WakeRetry";
 import { clientFetch } from "@/lib/api";
 
 interface RunRecord {
@@ -49,6 +50,7 @@ export function RunLog() {
 
   const load = useCallback(() => {
     setBusy(true);
+    setError(null);
     clientFetch<RunsResponse>("/api/v1/runs?limit=12")
       .then(setData)
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
@@ -57,18 +59,12 @@ export function RunLog() {
 
   useEffect(load, [load]);
 
-  if (error) {
-    return (
-      <div className="rounded-2xl border border-line bg-void-2/70 p-5 text-[12.5px] text-ink-dim">
-        Run log unavailable ({error}). The backend may be asleep.
-      </div>
-    );
-  }
+  if (error) return <WakeRetry error={`Run log unavailable: ${error}`} onRetry={load} busy={busy} label="Retry run log" />;
 
   if (busy || !data) {
     return (
       <div className="animate-pulse rounded-2xl border border-line bg-void-2/70 p-5 text-[12.5px] text-ink-dim">
-        Loading training history…
+Waking the API and loading training history…
       </div>
     );
   }

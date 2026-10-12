@@ -10,8 +10,9 @@
  */
 
 import { motion } from "motion/react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
+import { WakeRetry } from "@/components/body/WakeRetry";
 import { clientFetch } from "@/lib/api";
 
 interface Audit {
@@ -30,29 +31,36 @@ const ACCENT = "#a78bfa";
 export function FairnessAudit() {
   const [audit, setAudit] = useState<Audit | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(true);
   const [showFpr, setShowFpr] = useState(false);
 
-  useEffect(() => {
-    clientFetch<{ result: Audit }>("/api/v1/agent/tools/audit_model_fairness", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ arguments: {} }),
-    })
-      .then((r) => setAudit(r.result))
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+  const load = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await clientFetch<{ result: Audit }>("/api/v1/agent/tools/audit_model_fairness", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ arguments: {} }),
+      });
+      setAudit(response.result);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setBusy(false);
+    }
   }, []);
 
-  if (error)
-    return (
-      <div className="rounded-2xl border border-line bg-void-3 p-6 text-[13px] text-ink-dim">
-        Audit unavailable: {error}
-      </div>
-    );
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  if (error) return <WakeRetry error={`Fairness audit unavailable: ${error}`} onRetry={() => void load()} busy={busy} label="Retry audit" />;
 
   if (!audit)
     return (
-      <div className="animate-pulse rounded-2xl border border-line bg-void-2 p-6 text-[13px] text-ink-faint">
-        Running the audit…
+      <div role="status" className="animate-pulse rounded-2xl border border-line bg-void-2 p-6 text-[13px] text-ink-faint">
+        Waking the API and running the fairness audit…
       </div>
     );
 

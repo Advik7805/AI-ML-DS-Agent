@@ -9,8 +9,9 @@
  */
 
 import { motion } from "motion/react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
+import { WakeRetry } from "@/components/body/WakeRetry";
 import { rankAtRisk, type RankedCustomer, type RankedResponse } from "@/lib/api";
 
 function riskColor(_score: number) {
@@ -24,23 +25,18 @@ export function Portfolio() {
   const [n, setN] = useState(12);
   const [minScore, setMinScore] = useState(0.3);
 
-  useEffect(() => {
-    let cancelled = false;
+  const load = useCallback(() => {
     setBusy(true);
+    setError(null);
     rankAtRisk(n, minScore)
-      .then((r) => {
-        if (!cancelled) setData(r);
-      })
-      .catch((e) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
-      })
-      .finally(() => {
-        if (!cancelled) setBusy(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+      .then(setData)
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setBusy(false));
   }, [n, minScore]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   return (
     <div className="rounded-2xl border border-line bg-void-2 p-6 shadow-sm">
@@ -86,11 +82,8 @@ export function Portfolio() {
         </div>
       </div>
 
-      {error && (
-        <div className="mt-4 rounded-lg border border-line bg-void-3 p-3 text-[12px] text-ink-dim">
-          {error}
-        </div>
-      )}
+      {error && <div className="mt-4"><WakeRetry error={error} onRetry={load} busy={busy} label="Retry ranking" /></div>}
+      {busy && data && <p role="status" className="mt-3 text-[11px] text-ink-faint">Refreshing the ranked list…</p>}
 
       <div className="mt-5 overflow-x-auto">
         <table className="w-full text-left text-[12.5px]">
@@ -108,7 +101,7 @@ export function Portfolio() {
             {busy && !data && (
               <tr>
                 <td colSpan={6} className="py-8 text-center text-[12px] text-ink-faint">
-                  Loading…
+                  Waking the API and scoring the customer book…
                 </td>
               </tr>
             )}

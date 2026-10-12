@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { WakeRetry } from "@/components/body/WakeRetry";
 import { clientFetch } from "@/lib/api";
 
 /** Mirrors `drift_report()` in core/drift.py. */
@@ -64,18 +65,12 @@ export function DriftPanel({
 
   useEffect(load, [load]);
 
-  if (error) {
-    return (
-      <div className="rounded-2xl border border-line bg-void-3 p-5 text-[12.5px] text-ink-dim">
-        Drift check unavailable ({error}).
-      </div>
-    );
-  }
+  if (error) return <WakeRetry error={`Drift check unavailable: ${error}`} onRetry={load} busy={busy} label="Retry drift check" />;
 
   if (busy || !data) {
     return (
       <div className="animate-pulse rounded-2xl border border-line bg-void-2 p-5 text-[12.5px] text-ink-faint">
-        Comparing against the training distribution…
+        Waking the API and comparing with the training distribution…
       </div>
     );
   }

@@ -10,8 +10,9 @@
  */
 
 import { motion } from "motion/react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
+import { WakeRetry } from "@/components/body/WakeRetry";
 import { clientFetch } from "@/lib/api";
 import type { MetricsReport } from "@/lib/types";
 
@@ -40,35 +41,48 @@ export function FleetBoard() {
   const [n, setN] = useState(12);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [metricsBusy, setMetricsBusy] = useState(true);
+  const [metricsError, setMetricsError] = useState<string | null>(null);
 
-  useEffect(() => {
-    clientFetch<MetricsReport>("/api/v1/modules/maintenance/metrics")
-      .then(setMetrics)
-      .catch(() => setMetrics(null));
+  const loadMetrics = useCallback(async () => {
+    setMetricsBusy(true);
+    setMetricsError(null);
+    try {
+      setMetrics(await clientFetch<MetricsReport>("/api/v1/modules/maintenance/metrics"));
+    } catch (reason) {
+      setMetricsError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setMetricsBusy(false);
+    }
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
+  const loadFleet = useCallback(async () => {
     setBusy(true);
-    clientFetch<{ result: Fleet }>("/api/v1/agent/tools/rank_engines_by_urgency", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ arguments: { n } }),
-    })
-      .then((r) => !cancelled && setFleet(r.result))
-      .catch((e) => !cancelled && setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => !cancelled && setBusy(false));
-    return () => {
-      cancelled = true;
-    };
+    setError(null);
+    try {
+      const response = await clientFetch<{ result: Fleet }>("/api/v1/agent/tools/rank_engines_by_urgency", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ arguments: { n } }),
+      });
+      setFleet(response.result);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setBusy(false);
+    }
   }, [n]);
 
+  useEffect(() => {
+    void loadMetrics();
+  }, [loadMetrics]);
+
+  useEffect(() => {
+    void loadFleet();
+  }, [loadFleet]);
+
   if (error)
-    return (
-      <div className="rounded-2xl border border-line bg-void-3 p-6 text-[13px] text-ink-dim">
-        Fleet unavailable: {error}
-      </div>
-    );
+    return <WakeRetry error={`Fleet ranking unavailable: ${error}`} onRetry={() => void loadFleet()} busy={busy} label="Retry fleet" />;
 
   // Band MAEs live in the metric names, e.g. mae_0_30_cycles. Pulling them from the report
   // rather than hard-coding keeps the panel honest if the bands ever change.
@@ -86,7 +100,7 @@ export function FleetBoard() {
           <div>
             <h3 className="text-[15px] font-semibold tracking-tight">Maintenance queue</h3>
             <p className="mt-0.5 text-[11.5px] text-ink-faint">
-              {fleet ? `${fleet.n_engines} engines · ${fleet.data_source} telemetry` : "loading…"}
+              {fleet ? `${fleet.n_engines} engines · ${fleet.data_source} telemetry` : "Waiting for fleet ranking…"}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -145,12 +159,14 @@ export function FleetBoard() {
           ))}
 
           {busy && (
-            <div className="py-6 text-center text-[12px] text-ink-faint">Ranking the fleet…</div>
+            <div role="status" className="py-6 text-center text-[12px] text-ink-faint">Waking the API and ranking the fleet…</div>
           )}
         </div>
       </div>
 
       <div className="space-y-3">
+        {metricsError && <WakeRetry error={`Model metrics unavailable: ${metricsError}`} onRetry={() => void loadMetrics()} busy={metricsBusy} label="Retry metrics" />}
+        {metricsBusy && !metrics && <p role="status" className="text-[11px] text-ink-faint">Loading maintenance model metrics…</p>}
         {metrics && (
           <div className="rounded-2xl border border-line bg-void-2 p-5 shadow-sm">
             <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-ink-faint">

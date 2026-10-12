@@ -11,8 +11,9 @@
  */
 
 import { motion } from "motion/react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
+import { WakeRetry } from "@/components/body/WakeRetry";
 import { clientFetch } from "@/lib/api";
 
 interface ScrapeResult {
@@ -80,6 +81,8 @@ async function call<T>(tool: string, args: Record<string, unknown>): Promise<T> 
 export function AcquisitionConsole() {
   const [tab, setTab] = useState<Tab>("fetch");
   const [caps, setCaps] = useState<Caps | null>(null);
+  const [capsBusy, setCapsBusy] = useState(true);
+  const [capsError, setCapsError] = useState<string | null>(null);
   const [url, setUrl] = useState("https://example.com/pricing");
   const [query, setQuery] = useState("predictive maintenance benchmarks 2026");
   const [busy, setBusy] = useState(false);
@@ -88,9 +91,21 @@ export function AcquisitionConsole() {
   const [search, setSearch] = useState<SearchResult | null>(null);
   const [extract, setExtract] = useState<ExtractResult | null>(null);
 
-  useEffect(() => {
-    call<Caps>("scraper_capabilities", {}).then(setCaps).catch(() => setCaps(null));
+  const loadCaps = useCallback(async () => {
+    setCapsBusy(true);
+    setCapsError(null);
+    try {
+      setCaps(await call<Caps>("scraper_capabilities", {}));
+    } catch (reason) {
+      setCapsError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setCapsBusy(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void loadCaps();
+  }, [loadCaps]);
 
   async function runFetch() {
     setBusy(true); setError(null); setScrape(null);
@@ -157,9 +172,15 @@ export function AcquisitionConsole() {
             className="rounded-xl px-4 py-2.5 text-[13px] font-medium text-white transition hover:brightness-110 disabled:opacity-40"
             style={{ background: ACCENT }}
           >
-            {busy ? "Running…" : tab === "search" ? "Search" : tab === "extract" ? "Extract" : "Fetch"}
+            {busy ? "Waiting…" : tab === "search" ? "Search" : tab === "extract" ? "Extract" : "Fetch"}
           </button>
         </form>
+
+        {busy && (
+          <p role="status" aria-live="polite" className="mt-3 text-[11px] text-ink-faint">
+            Waiting for the {tab === "search" ? "search" : tab === "extract" ? "extraction" : "fetch"} service. A cold free-tier API may take a moment to wake.
+          </p>
+        )}
 
         {tab === "extract" && (
           <p className="mt-2 text-[11px] text-ink-faint">
@@ -168,8 +189,17 @@ export function AcquisitionConsole() {
         )}
 
         {error && (
-          <div className="mt-4 rounded-xl border border-line bg-void-3 p-4 text-[12.5px] text-ink-dim">
-            {error}
+          <div className="mt-4">
+            <WakeRetry
+              error={error}
+              busy={busy}
+              label="Retry action"
+              onRetry={() => {
+                if (tab === "fetch") void runFetch();
+                else if (tab === "search") void runSearch();
+                else void runExtract();
+              }}
+            />
           </div>
         )}
 
@@ -247,6 +277,8 @@ export function AcquisitionConsole() {
       </div>
 
       <div className="space-y-3">
+        {capsError && <WakeRetry error={`Scraper capability check unavailable: ${capsError}`} onRetry={() => void loadCaps()} busy={capsBusy} label="Retry status" />}
+        {capsBusy && !caps && <p role="status" className="rounded-xl border border-line bg-void-2 p-4 text-[11px] text-ink-faint">Waking the API and checking scraper backends…</p>}
         {caps && (
           <>
             <Backend

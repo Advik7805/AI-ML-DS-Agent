@@ -10,8 +10,9 @@
  */
 
 import { motion } from "motion/react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
+import { WakeRetry } from "@/components/body/WakeRetry";
 import { clientFetch } from "@/lib/api";
 
 interface Sku {
@@ -39,21 +40,33 @@ export function OpportunityBoard() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Sku | null>(null);
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
+  const [detailBusy, setDetailBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await clientFetch<{ result: Opportunities }>("/api/v1/agent/tools/list_skus_by_opportunity", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ arguments: {} }),
+      });
+      setData(response.result);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setBusy(false);
+    }
+  }, []);
 
   useEffect(() => {
-    clientFetch<{ result: Opportunities }>("/api/v1/agent/tools/list_skus_by_opportunity", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ arguments: {} }),
-    })
-      .then((r) => setData(r.result))
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setBusy(false));
-  }, []);
+    void load();
+  }, [load]);
 
   async function optimise(sku: string) {
     setSelected(data?.top.find((s) => s.sku === sku) ?? null);
     setDetail(null);
+    setDetailBusy(true);
     try {
       const r = await clientFetch<{ result: Record<string, unknown> }>(
         "/api/v1/agent/tools/optimise_price",
@@ -64,22 +77,19 @@ export function OpportunityBoard() {
         },
       );
       setDetail(r.result);
-    } catch (e) {
-      setDetail({ error: e instanceof Error ? e.message : String(e) });
+    } catch (reason) {
+      setDetail({ error: reason instanceof Error ? reason.message : String(reason) });
+    } finally {
+      setDetailBusy(false);
     }
   }
 
-  if (error)
-    return (
-      <div className="rounded-2xl border border-line bg-void-3 p-6 text-[13px] text-ink-dim">
-        Pricing unavailable: {error}
-      </div>
-    );
+  if (error) return <WakeRetry error={`Pricing board unavailable: ${error}`} onRetry={() => void load()} busy={busy} label="Retry pricing" />;
 
   if (!data)
     return (
-      <div className="animate-pulse rounded-2xl border border-line bg-void-2 p-6 text-[13px] text-ink-faint">
-        Estimating elasticities…
+      <div role="status" className="animate-pulse rounded-2xl border border-line bg-void-2 p-6 text-[13px] text-ink-faint">
+        Waking the API and estimating SKU elasticities…
       </div>
     );
 
@@ -170,11 +180,15 @@ export function OpportunityBoard() {
             confidence interval and the demand floor the recommendation respects.</p>
         )}
 
-        {selected && !detail && (
-          <p className="mt-3 animate-pulse text-[12.5px] text-ink-faint">Optimising…</p>
+        {selected && detailBusy && (
+          <p role="status" className="mt-3 animate-pulse text-[12.5px] text-ink-faint">Running the price optimization tool…</p>
         )}
 
-        {selected && detail && (
+        {selected && detail && typeof detail.error === "string" && (
+          <WakeRetry error={detail.error} onRetry={() => void optimise(selected.sku)} busy={detailBusy} label="Retry recommendation" />
+        )}
+
+        {selected && detail && typeof detail.error !== "string" && (
           <Detail meta={(detail.meta ?? {}) as Record<string, unknown>}
                   price={(detail.meta as Record<string, unknown>)?.recommended_price}
                   label={detail.label} decision={detail.decision} />
