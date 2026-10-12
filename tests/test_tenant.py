@@ -32,6 +32,37 @@ def test_every_registered_body_has_a_dataset_card(registry) -> None:
     assert not missing, f"bodies with no provenance: {missing}"
 
 
+def test_ranked_lists_carry_their_provenance_inline(client) -> None:
+    """A list of rows must not be readable without knowing whose data it is and where it came from."""
+    r = client.post(
+        "/api/v1/agent/tools/rank_at_risk_customers",
+        json={"arguments": {"n": 3}},
+    )
+    assert r.status_code == 200
+    block = r.json()["result"]
+    for field in ("tenant", "business_unit", "dataset", "dataset_source", "dataset_origin",
+                  "dataset_rows", "join_key", "system_of_record"):
+        assert block.get(field), f"the churn ranking is missing '{field}'"
+    assert block["dataset_rows"] == 3333
+    assert block["customers"][0]["customer_id"].startswith("NW-C-")
+
+    # Engines are ranked by the same rule, keyed by the asset id the registry publishes.
+    engines = client.post(
+        "/api/v1/agent/tools/rank_engines_by_urgency", json={"arguments": {"n": 2}}
+    ).json()["result"]
+    assert engines["business_unit"] == "Northwind Industrial"
+    assert engines["engines"][0]["asset_id"].startswith("NW-E-")
+    assert engines["engines"][0]["rul_cap"] == 125
+
+    # The fraud stream reports per-row keys as well as its provenance.
+    fraud = client.post(
+        "/api/v1/agent/tools/summarise_fraud_stream", json={"arguments": {"n": 20}}
+    ).json()["result"]
+    assert fraud["business_unit"] == "Northwind Pay"
+    if fraud["top_flagged"]:
+        assert fraud["top_flagged"][0]["auth_id"].startswith("NW-A-")
+
+
 def test_the_tenant_registry_covers_every_body_that_ships(registry) -> None:
     """A new body without a registry entry would render an empty card, so fail loudly here."""
     assert set(registry.ids()) == set(DATASETS), (
@@ -116,7 +147,10 @@ def test_churn_rank_tool_returns_the_join_key(registry) -> None:
     for row in result["customers"]:
         assert row["customer_id"].startswith("NW-C-")
     assert result["business_unit"] == "Northwind Connect"
-    assert result["join_key"] == "customer_id"
+    # The registry's key string carries the id format as well as the column, e.g.
+    # "customer_id (NW-C-######)" — informative in a payload, so the assertion checks the column
+    # name it starts with rather than flattening it.
+    assert result["join_key"].startswith("customer_id")
 
 
 def test_predictions_carry_the_tenant_stamp(registry) -> None:

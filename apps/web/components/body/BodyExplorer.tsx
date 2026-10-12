@@ -107,8 +107,12 @@ export function BodyExplorer({ moduleId, accent }: Props) {
       if (r && typeof r.score === "number" && typeof r.label === "string") {
         setPrediction(r as unknown as Prediction);
       }
+      // Only bodies that actually ship an explainer are asked for an explanation. Pricing and
+      // the scraper do not, and the request used to be sent anyway and 422 — noise in the API log,
+      // and a round trip that can never succeed.
       const feats = predictionFeatures(r);
-      if (feats) {
+      const explains = (manifest?.capabilities ?? []).some((c) => c.includes("shap") || c === "xai");
+      if (feats && explains) {
         try {
           setExplanation(await clientFetch<Explanation>(`/api/v1/modules/${moduleId}/explain`, {
             method: "POST",
@@ -116,7 +120,7 @@ export function BodyExplorer({ moduleId, accent }: Props) {
             body: JSON.stringify({ features: feats }),
           }));
         } catch {
-          /* not every body explains */
+          /* an explainer that is present but unhappy must not break the score */
         }
       }
     } catch (e) {
@@ -125,7 +129,7 @@ export function BodyExplorer({ moduleId, accent }: Props) {
       clearInterval(tick);
       setBusy(false);
     }
-  }, [tool, args, moduleId]);
+  }, [tool, args, moduleId, manifest]);
 
   const props = (tool?.parameters_schema?.properties ?? {}) as Json;
   const required = new Set((tool?.parameters_schema?.required ?? []) as string[]);
@@ -295,7 +299,7 @@ export function BodyExplorer({ moduleId, accent }: Props) {
 
           <div className="space-y-4">
             {error && (
-              <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-[12.5px] text-red-700">
+              <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-[12.5px] text-red-300">
                 {error}
               </div>
             )}

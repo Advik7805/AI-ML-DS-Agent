@@ -17,14 +17,22 @@ import type { MetricsReport } from "@/lib/types";
 
 interface Engine {
   unit: number;
+  /** The tenant's asset id for this engine (NW-E-##) — the key the registry publishes. */
+  asset_id?: string;
   cycle: number;
   predicted_rul: number;
   urgency: number;
+  rul_cap?: number;
 }
 
 interface Fleet {
   n_engines: number;
   data_source: string;
+  tenant?: string;
+  business_unit?: string;
+  dataset?: string;
+  dataset_source?: string;
+  join_key?: string;
   engines: Engine[];
 }
 
@@ -90,6 +98,12 @@ export function FleetBoard() {
             <h3 className="text-[15px] font-semibold tracking-tight">Maintenance queue</h3>
             <p className="mt-0.5 text-[11.5px] text-ink-faint">
               {fleet ? `${fleet.n_engines} engines · ${fleet.data_source} telemetry` : "loading…"}
+              {fleet?.dataset_source && (
+                <span className="mt-0.5 block text-ink-faint">
+                  {fleet.business_unit} · {fleet.dataset} — {fleet.dataset_source}. Assets are keyed
+                  the same way in work orders and in the pricing board&rsquo;s SKU table.
+                </span>
+              )}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -107,8 +121,8 @@ export function FleetBoard() {
         </div>
 
         <div className="mt-4 space-y-1">
-          <div className="grid grid-cols-[52px_70px_1fr_86px_64px] gap-2 px-1 pb-1 font-mono text-[10px] uppercase tracking-wider text-ink-faint">
-            <span>unit</span>
+          <div className="grid grid-cols-[86px_70px_1fr_86px_64px] gap-2 px-1 pb-1 font-mono text-[10px] uppercase tracking-wider text-ink-faint">
+            <span>asset</span>
             <span>cycle</span>
             <span>predicted life left</span>
             <span className="text-right">rul</span>
@@ -121,9 +135,12 @@ export function FleetBoard() {
               initial={{ opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.025 }}
-              className="grid grid-cols-[52px_70px_1fr_86px_64px] items-center gap-2 rounded-lg px-1 py-1.5 hover:bg-white/5"
+              className="grid grid-cols-[86px_70px_1fr_86px_64px] items-center gap-2 rounded-lg px-1 py-1.5 hover:bg-white/5"
             >
-              <span className="font-mono text-[12px] text-ink-dim">#{e.unit}</span>
+              <span className="font-mono text-[12px] text-ink">
+                {e.asset_id ?? `#${e.unit}`}
+                <span className="ml-1 text-ink-faint">u{e.unit}</span>
+              </span>
               <span className="font-mono text-[11.5px] tabular-nums text-ink-dim">{e.cycle}</span>
               <div className="relative h-2 overflow-hidden rounded-full bg-white/5">
                 <motion.div

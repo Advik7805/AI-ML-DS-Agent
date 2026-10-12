@@ -29,13 +29,41 @@ and identity — while connecting to the hub through one shared contract.
 | Predictive maintenance | `/maintenance` | synthetic CMAPSS-compatible | R² **0.816**, MAE 12.23 cycles (GroupKFold by engine) |
 | Dynamic pricing | `/pricing` | synthetic point-of-sale | 22/24 SKUs with identified elasticity |
 | Explainable diagnostics | `/diagnostics` | real Pima diabetes | ROC-AUC 0.690; fairness gap **0.208** flagged |
-| Knowledge RAG | `/rag` | 6-doc policy corpus | hit@1 **0.833**, 25 passages |
+| Knowledge RAG | `/rag` | 7-doc policy corpus | hit@1 **0.833**, 35 passages, or your own file |
 | Web scraper | `/scraper` | mock by default | host-allowlisted, size-capped |
 
-**221 tests passing** (`python3 -m pytest -q`), across eight suites: contract conformance,
-per-body model quality, the gateway over HTTP, integrations, the LLM providers, explainer
-selection, experiment tracking and orchestration, and the churn body. **22 tools** register into
-one registry, names globally unique.
+**309 tests passing** (`python3 -m pytest -q`), across thirteen suites: contract conformance,
+per-body model quality, the gateway over HTTP, file upload, warm-up, model-card provenance,
+tool callability, HTTP route coverage, frontend contracts, integrations, the LLM providers, explainer selection, experiment tracking and
+orchestration, and the churn body. **22 tools** register into one registry, names globally
+unique, and a test calls every one of them with exactly the arguments the UI prefills.
+
+**Bring your own data.** `POST /api/v1/modules/{id}/analyze` takes a multipart upload, caps it at
+10 MB *while streaming*, keeps it in memory and never writes it to disk, and maps your columns
+onto the body's schema — reporting matched, ignored and missing columns instead of guessing. A
+labelled file gets real PR-AUC/ROC-AUC/precision/recall; an unlabelled one gets a distribution
+report and **no accuracy claim**. The file is then answerable by the agent: `search_knowledge`
+and the chat both read an overlay of your session's documents, ranked in a separate space from
+the shipped corpus so the two score lists are never blended.
+
+**The first request is no longer the slow one.** Bodies used to train lazily, so a cold instance
+paid for training inside the user's first click. The lifespan hook now warms every body on one
+background thread. Measured on a genuinely cold start (artifacts deleted):
+
+| | |
+|---|---|
+| Four trainable bodies, trained on demand inside the first request | **7.37 s** |
+| The same four, warmed in the background while the API serves | **7.67 s**, off the critical path |
+| `/health` while that is running | **6 ms** — it reports progress rather than waiting |
+| First tool call after warm-up | **2–26 ms** |
+
+**One company, seven bodies.** Every body names the enterprise it belongs to, the dataset it
+scores, the row grain, the join key and the system of record, in `core/tenant.py` and on the page
+itself. Nothing is unattributed and nothing is misattributed: three datasets are real and public
+(IBM Telco Customer Churn, NASA CMAPSS FD001, Pima Indians Diabetes) with their true row counts,
+four are generated and labelled as generated, and the tenant is a named, explicitly **fictional**
+company — attributing public data to a real named corporation would be a fabrication. Full
+rationale: [`core/tenant.py`](core/tenant.py).
 
 Results are read from the live gateway, not a notebook — e.g.
 `GET /api/v1/modules/churn/metrics` and `GET /api/v1/agent/tools`.
@@ -109,6 +137,10 @@ Two rules keep it honest, both enforced in CI:
 ```
 core/
   types.py       Prediction · Explanation · MetricsReport · ModuleManifest — one shape for all
+  tenant.py      the fictional company, and every dataset's true origin, grain and join key
+  upload.py      CSV/CMAPSS/text/PDF ingest: schema mapping, honest reports, never persisted
+  sessions.py    per-session uploads and RAG overlays; 10 MB cap, TTL, no disk writes
+  warmup.py      trains every body at boot, off the request path, and publishes what it did
   contract.py    the Module ABC; the registry that discovers bodies; the training hook
   explain.py     explainer selection by estimator type, so a linear model cannot crash SHAP
   drift.py       PSI per feature, binned on the training distribution
@@ -124,9 +156,11 @@ flows/
 apps/
   api/           FastAPI gateway. Generic — knows nothing about any one body.
   web/           Next.js: (hub)/ plus one root layout per body
+  web/scripts/   browser-check.mjs — hydration, all routes, the upload studio, in a real browser
 data/fetch.sh    pulls the real datasets; refuses Git LFS pointers
-tests/           8 suites: contract, per-body quality, integrations, gateway over HTTP,
-                 providers, explainer selection, tracking + orchestration, churn
+tests/           13 suites: contract, per-body quality, gateway over HTTP, upload, warm-up,
+                 model-card provenance, tool callability, route coverage, frontend contracts,
+                 integrations, providers, explainer selection, tracking + orchestration, churn
 docs/            RESEARCH · ARCHITECTURE · BUILD-NOTES · DEPLOY
 deploy/          API Dockerfile · supabase_schema.sql
 .env.example     every variable the platform reads, with its free-tier terms
@@ -141,7 +175,7 @@ deploy/          API Dockerfile · supabase_schema.sql
 ```bash
 pip install -r requirements.txt
 bash data/fetch.sh                    # real dataset; optional — synthetic fallback works
-python -m pytest                      # 221 tests
+python -m pytest                      # 309 tests
 python -m modules.churn.train         # held-out metrics
 uvicorn apps.api.main:app --reload    # http://localhost:8000/docs
 ```

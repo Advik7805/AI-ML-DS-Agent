@@ -297,6 +297,8 @@ class FraudModule(Module):
             combined, sup, unsup = bundle.predict_proba(payload)
             rows.append(
                 {
+                    "auth_id": str(row.get("auth_id", "")),
+                    "customer_id": str(row.get("customer_id", "")),
                     "amount": float(row["amount"]),
                     "risk": round(float(combined), 4),
                     "flagged": bool(combined >= bundle.threshold),
@@ -308,20 +310,23 @@ class FraudModule(Module):
         caught = sum(1 for r in rows if r["flagged"] and r["actual_fraud"])
         missed = sum(1 for r in rows if not r["flagged"] and r["actual_fraud"])
         false_alarms = sum(1 for r in rows if r["flagged"] and not r["actual_fraud"])
-        return {
-            "n_scored": len(rows),
-            "n_flagged": len(flagged),
-            "true_positives": caught,
-            "false_positives": false_alarms,
-            "missed_fraud": missed,
-            "threshold": bundle.threshold,
-            "enriched": True,
-            "enrichment_note": (
+        from core.tenant import provenance_block
+
+        return provenance_block(
+            self.id,
+            n_scored=len(rows),
+            n_flagged=len(flagged),
+            true_positives=caught,
+            false_positives=false_alarms,
+            missed_fraud=missed,
+            threshold=bundle.threshold,
+            enriched=True,
+            enrichment_note=(
                 "Sample is fraud-enriched so the summary is informative; real traffic is ~1% "
                 "fraudulent."
             ),
-            "top_flagged": sorted(flagged, key=lambda r: -r["risk"])[:5],
-        }
+            top_flagged=sorted(flagged, key=lambda r: -r["risk"])[:5],
+        )
 
     def tool_check_fraud_drift(self, n: int = 400) -> dict[str, Any]:
         """Compare a fresh batch of transactions against the distribution the model trained on.

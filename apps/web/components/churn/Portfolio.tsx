@@ -55,6 +55,14 @@ export function Portfolio() {
               ? `${data.n_returned} of ${data.n_scored.toLocaleString()} customers scored from ${data.data_source} data`
               : "Scoring the loaded customer base…"}
           </p>
+          {data?.dataset && (
+            <p className="mt-1 text-[11.5px] leading-relaxed text-ink-faint">
+              {data.business_unit} · {data.dataset}
+              {data.dataset_source ? ` — ${data.dataset_source}` : ""} · keyed by {data.join_key}.
+              The same ids appear in the fraud board, so a subscriber here can be joined to their
+              card activity.
+            </p>
+          )}
         </div>
 
         <div className="flex items-center gap-4">
@@ -89,7 +97,7 @@ export function Portfolio() {
       </div>
 
       {error && (
-        <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-[12px] text-red-700">
+        <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-[12px] text-red-300">
           {error}
         </div>
       )}
@@ -98,7 +106,7 @@ export function Portfolio() {
         <table className="w-full text-left text-[12.5px]">
           <thead>
             <tr className="border-b border-line font-mono text-[10px] uppercase tracking-[0.14em] text-ink-faint">
-              <th className="py-2 pr-3 font-normal">#</th>
+              <th className="py-2 pr-3 font-normal">Customer</th>
               <th className="py-2 pr-3 font-normal">State</th>
               <th className="py-2 pr-3 font-normal">Risk</th>
               <th className="py-2 pr-3 font-normal">Band</th>
@@ -129,7 +137,10 @@ export function Portfolio() {
                 transition={{ delay: Math.min(i * 0.02, 0.4) }}
                 className="border-b border-white/5 last:border-0 hover:bg-white/5"
               >
-                <td className="py-2.5 pr-3 font-mono text-[11px] text-ink-faint">{c.row_index}</td>
+                <td className="py-2.5 pr-3 font-mono text-[11px]">
+                  <span className="text-ink">{c.customer_id || `row ${c.row_index}`}</span>
+                  <span className="ml-2 text-ink-faint">row {c.row_index}</span>
+                </td>
                 <td className="py-2.5 pr-3 font-mono text-[12px]">{c.state}</td>
                 <td className="py-2.5 pr-3">
                   <div className="flex items-center gap-2">

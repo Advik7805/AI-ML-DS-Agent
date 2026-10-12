@@ -379,19 +379,27 @@ class MaintenanceModule(Module):
         latest = df.sort_values("cycle").groupby("unit").tail(1).reset_index(drop=True)
         ruls = np.clip(bundle.model.predict(latest[cols]), 0, RUL_CAP)
         order = np.argsort(ruls)[:n]
-        return {
-            "n_engines": int(latest["unit"].nunique()),
-            "data_source": source,
-            "engines": [
-                {
-                    "unit": int(latest.iloc[i]["unit"]),
-                    "cycle": int(latest.iloc[i]["cycle"]),
-                    "predicted_rul": round(float(ruls[i]), 1),
-                    "urgency": round(float(1 - ruls[i] / RUL_CAP), 3),
-                }
-                for i in order
-            ],
-        }
+        from core.tenant import asset_id, provenance_block
+
+        ranked = [
+            {
+                # The asset id is the same key the tenant registry publishes, so a row here can be
+                # quoted in a work order or joined to the part price on the pricing board.
+                "unit": int(latest.iloc[i]["unit"]),
+                "asset_id": asset_id(int(latest.iloc[i]["unit"])),
+                "cycle": int(latest.iloc[i]["cycle"]),
+                "predicted_rul": round(float(ruls[i]), 1),
+                "urgency": round(float(1 - ruls[i] / RUL_CAP), 3),
+                "rul_cap": RUL_CAP,
+            }
+            for i in order
+        ]
+        return provenance_block(
+            self.id,
+            n_engines=int(latest["unit"].nunique()),
+            data_source=source,
+            engines=ranked,
+        )
 
     def tool_check_fleet_drift(self, n_engines: int = 20) -> dict[str, Any]:
         """Compare fresh telemetry against the distribution the RUL model was trained on.

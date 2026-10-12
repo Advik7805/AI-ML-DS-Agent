@@ -135,6 +135,8 @@ export async function explain(
 
 export interface RankedCustomer {
   row_index: number;
+  /** The tenant's shared key space — the same person appears in the fraud book under this id. */
+  customer_id: string;
   state: string;
   score: number;
   label: string;
@@ -147,6 +149,14 @@ export interface RankedResponse {
   n_scored: number;
   data_source: string;
   threshold: number;
+  // Provenance travels with the list, so the table can say what it is showing.
+  tenant?: string;
+  business_unit?: string;
+  dataset?: string;
+  dataset_source?: string;
+  dataset_origin?: string;
+  dataset_rows?: number | null;
+  join_key?: string;
   customers: RankedCustomer[];
 }
 

@@ -14,7 +14,7 @@ import threading
 from typing import Any
 
 from core.contract import Module
-from core.tenant import prediction_meta
+from core.tenant import prediction_meta, provenance_block
 from core.types import AgentTool, Explanation, FeatureAttribution, MetricsReport, ModuleManifest, Prediction
 
 from .data import FEATURES, TARGET, load_telco
@@ -263,17 +263,14 @@ class ChurnModule(Module):
             if len(out) >= n:
                 break
 
-        return {
-            "n_returned": len(out),
-            "n_scored": int(len(df)),
-            "data_source": source,
-            "tenant": "Northwind Global",
-            "business_unit": "Northwind Connect",
-            "dataset": "Subscriber billing & behaviour extract (IBM Telco Customer Churn, 3,333 rows)",
-            "join_key": "customer_id",
-            "threshold": bundle.threshold,
-            "customers": out,
-        }
+        return provenance_block(
+            self.id,
+            n_returned=len(out),
+            n_scored=int(len(df)),
+            data_source=source,
+            threshold=bundle.threshold,
+            customers=out,
+        )
 
     def tool_get_churn_model_metrics(self) -> dict[str, Any]:
         report = self.evaluate()

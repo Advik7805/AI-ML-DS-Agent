@@ -372,6 +372,38 @@ def prediction_meta(module_id: str, **extra: Any) -> dict[str, Any]:
     }
 
 
+def provenance_block(module_id: str, **extra: Any) -> dict[str, Any]:
+    """The attribution stamp that travels with a ranked list or a stream summary.
+
+    Every tool that returns *rows* — a target list, an engine ranking, a fraud stream — says in the
+    same payload whose data it is, what the dataset is called, where it really came from, how many
+    rows it covers and what the join key is. The point is that a list cannot be read without the
+    answer to "what am I looking at?" sitting in the same object, rather than three screens away
+    or in someone's head.
+
+    ``rows`` here is the shipped expectation from this registry; a body that observed something
+    different reports that separately through its dataset card.
+    """
+    d = DATASETS.get(module_id)
+    if d is None:
+        return {"tenant": TENANT["name"], **extra}
+    origin_detail = d.get("origin_detail", "")
+    # The short, citable name of the source: the text before the first dash or full stop. Long
+    # enough to name the dataset, short enough to sit in a JSON payload without a paragraph.
+    source = origin_detail.split(" — ")[0].split(". ")[0].strip()
+    return {
+        "tenant": TENANT["name"],
+        "business_unit": TENANT["units"].get(module_id, ""),
+        "dataset": d["dataset"],
+        "dataset_source": source,
+        "dataset_origin": d["origin"],
+        "dataset_rows": d.get("rows"),
+        "join_key": d["key"],
+        "system_of_record": d.get("system_of_record", ""),
+        **extra,
+    }
+
+
 def customer_id(row_index: int) -> str:
     """The shared key space. Deterministic, so a row ranked by churn is the same person a
     fraud event belongs to, in any process, with no lookup table."""

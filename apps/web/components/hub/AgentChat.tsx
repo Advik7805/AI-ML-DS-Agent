@@ -12,6 +12,7 @@ import { motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 
 import { clientFetch } from "@/lib/api";
+import { readSessionId, useSessionId } from "@/lib/session";
 
 interface TraceEntry {
   node?: string;
@@ -53,6 +54,9 @@ export function AgentChat() {
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // The same id the upload studio uses, so a file dropped there is visible here.
+  const session = useSessionId();
+
   useEffect(() => {
     clientFetch<{ provider: string; live: boolean; tools: string[]; note: string | null }>(
       "/api/v1/agent",
@@ -69,14 +73,22 @@ export function AgentChat() {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [turns, busy]);
 
-  // Guide cards and the upload studio dispatch this so a click lands here, filled in and focused.
+  // Guide cards and the upload studio dispatch this. The question is sent, not just typed in:
+  // a sample question that fills the box and stops leaves the user one click short, and a click
+  // that appears to do nothing is the exact failure this project is trying to avoid. `busyRef`
+  // keeps the listener (attached once) from sending while a previous answer is still streaming.
+  const busyRef = useRef(busy);
+  busyRef.current = busy;
+  const sendRef = useRef(send);
+  sendRef.current = send;
+
   useEffect(() => {
     const onAsk = (e: Event) => {
       const detail = (e as CustomEvent<string>).detail;
-      if (typeof detail === "string" && detail.trim()) {
-        setInput(detail);
-        inputRef.current?.focus();
-      }
+      if (typeof detail !== "string" || !detail.trim()) return;
+      setInput(detail);
+      inputRef.current?.focus();
+      if (!busyRef.current) void sendRef.current(detail);
     };
     window.addEventListener("saros:ask", onAsk);
     return () => window.removeEventListener("saros:ask", onAsk);
@@ -103,7 +115,9 @@ export function AgentChat() {
       }>("/api/v1/agent/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message, history }),
+        // session_id is what makes an uploaded file visible to the agent. Read fresh rather than
+        // from render state: the id can be minted by a click that happened after this render.
+        body: JSON.stringify({ message, history, session_id: session || readSessionId() }),
       });
       setTurns((t) => [
         ...t,

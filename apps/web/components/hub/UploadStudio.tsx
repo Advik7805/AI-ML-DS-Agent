@@ -13,8 +13,9 @@
  * conversation, with no re-upload.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 
+import { readSessionId, useSessionId } from "@/lib/session";
 import type { DatasetCard, MetricsReport, ModuleManifest, Prediction } from "@/lib/types";
 
 interface ColumnsReport {
@@ -49,31 +50,9 @@ interface Rejection {
   hint?: string;
 }
 
-const SESSION_KEY = "saros.session";
-
-/** A stable, opaque session id. Persisted in localStorage so a reload keeps your uploads. */
-function useSession(): string {
-  const [id, setId] = useState<string>("");
-  useEffect(() => {
-    try {
-      const existing = window.localStorage.getItem(SESSION_KEY);
-      if (existing) {
-        setId(existing);
-        return;
-      }
-      const minted = `s_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
-      window.localStorage.setItem(SESSION_KEY, minted);
-      setId(minted);
-    } catch {
-      // Private mode with storage disabled: an ephemeral id still works for this page view.
-      setId(`s_${Math.random().toString(36).slice(2, 22)}`);
-    }
-  }, []);
-  return id;
-}
 
 export function UploadStudio({ modules }: { modules: ModuleManifest[] }) {
-  const session = useSession();
+  const session = useSessionId();
   const [moduleId, setModuleId] = useState<string>(modules[0]?.id ?? "churn");
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -111,13 +90,14 @@ export function UploadStudio({ modules }: { modules: ModuleManifest[] }) {
       }
       setBusy(true);
       setProgress(`Uploading ${file.name}…`);
+      const id = session || readSessionId();
       const form = new FormData();
       form.append("file", file);
-      form.append("session_id", session);
+      form.append("session_id", id);
       try {
         const res = await fetch(`/api/v1/modules/${moduleId}/analyze`, {
           method: "POST",
-          headers: { "x-saros-session": session },
+          headers: { "x-saros-session": id },
           body: form,
         });
         setProgress(res.status === 503 || res.status === 502 ? "The API is waking up…" : null);
@@ -152,7 +132,7 @@ export function UploadStudio({ modules }: { modules: ModuleManifest[] }) {
         const res = await fetch("/api/v1/agent/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: text, session_id: session }),
+          body: JSON.stringify({ message: text, session_id: session || readSessionId() }),
         });
         const payload = (await res.json()) as { answer?: string; error?: string | null; detail?: string };
         setAnswer(payload.answer || payload.detail || payload.error || "No answer returned.");

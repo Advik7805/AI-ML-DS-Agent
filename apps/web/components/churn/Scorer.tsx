@@ -191,7 +191,7 @@ export function Scorer() {
           )}
 
           {error && (
-            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-[12px] text-red-700">
+            <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-[12px] text-red-300">
               {error}
             </div>
           )}
