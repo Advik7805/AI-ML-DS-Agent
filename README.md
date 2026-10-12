@@ -40,8 +40,9 @@ one registry, names globally unique.
 Results are read from the live gateway, not a notebook — e.g.
 `GET /api/v1/modules/churn/metrics` and `GET /api/v1/agent/tools`.
 
-The agent runs on a deterministic mock provider by default. Set `SAROS_LLM=groq` or
-`SAROS_LLM=gemini` with the matching key for real reasoning; a missing key falls back to mock
+The agent picks its provider automatically: `SAROS_LLM` defaults to `auto`, which uses Groq
+when `GROQ_API_KEY` is set, else Gemini when `GEMINI_API_KEY` is set, else the deterministic
+mock. An explicit `SAROS_LLM=mock|groq|gemini|echo` always overrides
 rather than failing.
 
 **Drift detection on the real-time bodies.** `check_fraud_drift` and `check_fleet_drift` compare

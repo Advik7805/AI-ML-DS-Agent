@@ -48,13 +48,17 @@ export function AgentChat() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [provider, setProvider] = useState<string>("");
+  const [live, setLive] = useState<boolean | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    clientFetch<{ provider: string; tools: string[]; note: string | null }>("/api/v1/agent")
+    clientFetch<{ provider: string; live: boolean; tools: string[]; note: string | null }>(
+      "/api/v1/agent",
+    )
       .then((info) => {
         setProvider(info.provider);
+        setLive(info.live);
         setNote(info.note);
       })
       .catch(() => setNote("Agent endpoint unreachable."));
@@ -118,8 +122,32 @@ export function AgentChat() {
           </span>
           <span className="text-[13px] font-semibold">Hub agent</span>
         </div>
-        <span className="font-mono text-[10px] uppercase tracking-widest text-ink-faint">
-          {provider || "connecting"}
+        <span
+          className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-ink-faint"
+          title={
+            live === false
+              ? "No LLM key configured — responses are templated from real tool output."
+              : live === true
+                ? "A real model is reasoning over the tool results."
+                : undefined
+          }
+        >
+          {live !== null && (
+            <span
+              className="h-1.5 w-1.5 rounded-full"
+              style={{ background: live ? "#34d399" : "var(--color-ink-faint)" }}
+            />
+          )}
+          {provider ? (
+            <>
+              {provider}
+              <span className={live ? "text-emerald-400/80" : "text-ink-faint"}>
+                {live ? "· live" : "· mock"}
+              </span>
+            </>
+          ) : (
+            "connecting"
+          )}
         </span>
       </div>
 

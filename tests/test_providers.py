@@ -23,6 +23,7 @@ from core.agent.providers import (
     MockProvider,
     ToolCall,
     get_provider,
+    resolve_provider_name,
 )
 from core.types import AgentTool
 
@@ -226,6 +227,76 @@ def test_gemini_handles_an_empty_candidates_array(monkeypatch) -> None:
 
 
 # --- provider selection -------------------------------------------------------
+
+
+def test_auto_picks_groq_when_only_that_key_is_set(monkeypatch) -> None:
+    """The default must be 'use the key that is present', not 'mock'.
+
+    The deploy this guards against had GROQ_API_KEY set on Render while SAROS_LLM stayed
+    unset, so the integrations panel said Groq LIVE and the chat said MOCK. Both readings
+    were true and the product looked broken.
+    """
+    monkeypatch.delenv("SAROS_LLM", raising=False)
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-test")
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    assert isinstance(get_provider(), GroqProvider)
+
+
+def test_auto_prefers_groq_over_gemini_when_both_keys_exist(monkeypatch) -> None:
+    monkeypatch.delenv("SAROS_LLM", raising=False)
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-test")
+    monkeypatch.setenv("GEMINI_API_KEY", "ai-test")
+    assert isinstance(get_provider(), GroqProvider)
+
+
+def test_auto_picks_gemini_when_only_gemini_key_is_set(monkeypatch) -> None:
+    monkeypatch.delenv("SAROS_LLM", raising=False)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.setenv("GEMINI_API_KEY", "ai-test")
+    assert isinstance(get_provider(), GeminiProvider)
+
+
+def test_auto_falls_back_to_mock_with_no_keys(monkeypatch) -> None:
+    """Zero keys is the free-tier case and must stay a working product, not a 500."""
+    monkeypatch.delenv("SAROS_LLM", raising=False)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    assert isinstance(get_provider(), MockProvider)
+
+
+def test_explicit_saros_llm_overrides_a_present_key(monkeypatch) -> None:
+    """Deliberate mock demos must stay possible; auto must not overrule an explicit choice."""
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-test")
+    monkeypatch.setenv("SAROS_LLM", "mock")
+    assert isinstance(get_provider(), MockProvider)
+    monkeypatch.setenv("SAROS_LLM", "echo")
+    assert isinstance(get_provider(), EchoProvider)
+
+
+def test_auto_resolves_the_same_name_without_constructing_the_provider(monkeypatch) -> None:
+    """`resolve_provider_name` is what the badge and /api/v1/agent report.
+
+    It has to agree with `get_provider`, or the UI can advertise a provider that is not the
+    one answering — the exact bug this whole change exists to remove.
+    """
+    monkeypatch.delenv("SAROS_LLM", raising=False)
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-test")
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    assert resolve_provider_name() == "groq" == get_provider().name
+
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.setenv("GEMINI_API_KEY", "ai-test")
+    assert resolve_provider_name() == "gemini" == get_provider().name
+
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    assert resolve_provider_name() == "mock" == get_provider().name
+
+
+def test_an_unknown_provider_name_still_uses_the_auto_rule(monkeypatch) -> None:
+    """A typo in SAROS_LLM is not a request for the mock when a key is configured."""
+    monkeypatch.setenv("SAROS_LLM", "openai")
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-test")
+    assert resolve_provider_name() == "groq"
 
 
 def test_missing_key_falls_back_to_mock_not_an_exception(monkeypatch) -> None:

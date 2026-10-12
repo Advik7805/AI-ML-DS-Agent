@@ -24,7 +24,7 @@ services:
       # key pasted into the dashboard for a local experiment cannot make a demo billable.
 
       - key: SAROS_LLM
-        value: "mock"               # mock | groq | gemini
+        value: "auto"               # auto | mock | groq | gemini; auto picks groq/gemini when a key exists
       - key: GROQ_API_KEY
         sync: false
       - key: GEMINI_API_KEY

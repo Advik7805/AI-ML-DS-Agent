@@ -10,11 +10,20 @@ One protocol, four implementations:
 - ``GeminiProvider`` — Google's REST API, free tier.
 - ``EchoProvider``   — never calls anything; useful for isolating graph bugs.
 
-Selection is by env var, so nothing in the codebase branches on which vendor you picked:
+Selection is by env var, and the **default is ``auto``**: a real model when a key is present, the
+labelled mock when none is. That default matters, because the failure it prevents is invisible.
+A deploy that has ``GROQ_API_KEY`` set but leaves ``SAROS_LLM`` unset used to sit on the mock
+provider while the integrations panel reported Groq as live — the product looked broken and the
+only clue was a badge nobody read.
 
-    SAROS_LLM=mock | groq | gemini | echo
+    SAROS_LLM=auto | groq | gemini | mock | echo      # auto is the default
     GROQ_API_KEY=...
     GEMINI_API_KEY=...
+
+``auto`` resolves in this order: Groq, then Gemini, then mock. An explicit ``SAROS_LLM`` always
+wins, including ``SAROS_LLM=mock``, which is how you demo the deterministic path deliberately
+rather than by accident. If a key is present but rejected by the vendor, the failure surfaces at
+call time as a readable error — it does not silently downgrade to the mock mid-conversation.
 
 Groq and Gemini are called over plain HTTP rather than through their SDKs: two fewer heavy
 dependencies in an image that has to fit in 512 MB on a free tier.
@@ -241,8 +250,9 @@ class MockProvider:
                     content=(
                         "I can score churn risk, rank an at-risk portfolio, report model metrics, "
                         "search the knowledge base, score a transaction for fraud, or scrape a URL. "
-                        "Tell me which. (Running on the mock provider — set SAROS_LLM=groq or "
-                        "gemini for real reasoning.)"
+                        "Tell me which. (Running on the deterministic mock provider — no LLM key "
+                        "is configured. Set GROQ_API_KEY or GEMINI_API_KEY and the hub switches "
+                        "to a real model on the next request.)"
                     ),
                 )
             args = self._args_for(tool, user_text, by_name[tool])
@@ -804,16 +814,46 @@ def _summarise(tool_output: str) -> str:
 # --- factory -----------------------------------------------------------------
 
 
+def resolve_provider_name(requested: str | None = None) -> str:
+    """Which provider ``auto`` (or an explicit name) resolves to, without constructing it.
+
+    Split out from :func:`get_provider` so the hub, the badge and the tests all answer
+    "which model is actually answering?" from one place. Two implementations of this rule is
+    exactly how the old deploy ended up advertising Groq while the chat ran on the mock.
+    """
+    name = (requested or os.getenv("SAROS_LLM", "auto")).strip().lower()
+    if name == "auto":
+        if os.getenv("GROQ_API_KEY", "").strip():
+            return "groq"
+        if os.getenv("GEMINI_API_KEY", "").strip():
+            return "gemini"
+        return "mock"
+    if name in ("groq", "gemini", "mock", "echo"):
+        return name
+    # An unknown value is a typo, not a request for silence: fall back to auto's rule.
+    return resolve_provider_name("auto")
+
+
 def get_provider(name: str | None = None) -> Provider:
     """Resolve the provider from env. Never raises for a missing key — falls back to mock.
 
-    A student deploying on a free tier will frequently have no key configured, and the hub
-    should still be a working product rather than a 500.
+    Default is ``auto``: ``GROQ_API_KEY`` -> Groq, else ``GEMINI_API_KEY`` -> Gemini, else the
+    labelled mock. A student deploying on a free tier will frequently have no key configured,
+    and the hub should still be a working product rather than a 500 — but a key that *is*
+    configured must never be ignored, which is what a hardcoded "mock" default did.
+
+    An explicitly named provider that cannot be constructed (``SAROS_LLM=groq`` with no key)
+    degrades to the mock rather than raising, so a bad env var cannot take the hub down.
     """
-    name = (name or os.getenv("SAROS_LLM", "mock")).strip().lower()
-    if name in ("groq", "gemini"):
+    name = resolve_provider_name(name)
+    if name == "groq":
         try:
-            return GroqProvider() if name == "groq" else GeminiProvider()
+            return GroqProvider()
+        except RuntimeError:
+            return MockProvider()
+    if name == "gemini":
+        try:
+            return GeminiProvider()
         except RuntimeError:
             return MockProvider()
     if name == "echo":

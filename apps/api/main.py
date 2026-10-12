@@ -303,17 +303,27 @@ def _coerce_history(raw: list[dict[str, str]]) -> list[Message]:
 def agent_info() -> dict[str, Any]:
     if agent is None:
         raise HTTPException(status_code=503, detail="Agent not initialised.")
+    from core.agent.providers import resolve_provider_name
+
+    live = agent.provider.name != "mock"
     return {
         "provider": agent.provider.name,
+        "provider_requested": os.getenv("SAROS_LLM", "auto"),
+        # The badge reads this. `provider` is what is *actually* answering; `note` explains a
+        # mock honestly instead of letting a user read "mock" and assume the product is broken.
+        "live": live,
         "max_iterations": agent.max_iterations,
         "tools": [t.name for t in agent.registry.all_tools()],
-        "note": (
-            "Running on the deterministic mock provider. Set SAROS_LLM=groq or "
-            "SAROS_LLM=gemini with the matching API key for real reasoning."
-            if agent.provider.name == "mock"
-            else None
+        "note": None
+        if live
+        else (
+            "Deterministic mock provider — no LLM key is configured, so answers are templated "
+            "from real tool output. Set GROQ_API_KEY or GEMINI_API_KEY (SAROS_LLM is 'auto' by "
+            f"default, currently '{resolve_provider_name()}') and the hub switches to a real "
+            "model with no code change."
         ),
     }
+
 
 
 @app.post("/api/v1/agent/chat", response_model=ChatResponse)
