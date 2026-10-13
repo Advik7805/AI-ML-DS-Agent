@@ -278,3 +278,95 @@ One of the ten is not a URL: the shields badge *label* encodes the host as
 reading *"live saros hub.vercel.app"*.
 
 The API link (`https://saros-api.onrender.com`) was checked the same way and needed no change.
+
+## 14. A retired model ID reached the user as a stack trace
+
+**Symptom:** two screenshots of the live app. The hub's *ask the agent about this file* box,
+after a CSV upload, showed this where the answer belongs:
+
+```
+RuntimeError: Groq 404: {"error":{"message":"The model llama-3.3-70b-versatile does not exist
+or you do not have access to it.","type":"invalid_request_error","code":"model_not_found"}}
+```
+
+A first-time visitor read that on a page whose whole job was to prove the product works. The
+upload itself had succeeded — the file was parsed, scored and indexed — so the failure was
+entirely in the last ten centimetres: the question could not be answered and the reason was
+rendered in the answer's place.
+
+**Cause, in three parts, each individually reasonable:**
+
+1. `llama-3.3-70b-versatile` was retired by Groq for free and developer tiers on **2026-08-16**,
+   and it was the hardcoded default in `GroqProvider`. Google retired the Gemini default,
+   `gemini-2.0-flash`, on **2026-06-01**. A vendor's deprecation calendar is invisible to a repo
+   that has no test hitting the vendor — and rightly so: a test suite should not call a paid API
+   or burn a free quota to check that a string still resolves.
+2. The provider was *designed* to raise. The module docstring said the failure "surfaces at call
+   time as a readable error — it does not silently downgrade to the mock mid-conversation". That
+   is a defensible instinct about honesty and it produced the worst possible outcome, because
+   there was nobody at call time *except the user*, and a readable error is still an error.
+3. The frontend treated the error as the answer:
+   `setAnswer(payload.answer || payload.detail || payload.error || ...)`. One `||` — and the
+   difference between a product and a stack trace is that `||`.
+
+**Decision reversed: "let it raise" became "degrade loudly".** The old design optimised for one
+failure mode (a user reading a templated answer and believing a model produced it) and ignored
+the one that actually happened (a user reading an exception where the answer belonged). The
+fallback keeps the honest part and drops the brittle part:
+
+- the answer is still produced, from the real tools;
+- the answer *carries the confession* — which provider failed, the vendor's own sentence, that
+  the tool results are real and only the wording is templated, and that the next message retries;
+- `GET /api/v1/agent` reports `live`, `degraded` (+ the readable reason and `provider_model`), or
+  no key at all, so the badge cannot call a template a language model.
+
+**Why the failure mode was structural, not incidental.** Model IDs expire on the vendor's
+schedule, so any single hardcoded ID is a deploy with a expiry date nobody wrote down. Both
+providers now carry ordered candidate lists (`GROQ_MODELS`, `GEMINI_MODELS`) with the deploy's
+own `GROQ_MODEL`/`GEMINI_MODEL` tried first, and rotation happens **only** for a retirement (404,
+or a 400 whose body says `model_not_found`/`does not exist`/`decommissioned`). A 401 or a 429
+raises on the first failure: retrying a bad key against three models is three times the cost of
+the same wall, and on a free tier that is the difference between a demo and a quota error. The
+model that worked is remembered, so a retired default costs one wasted request per deploy rather
+than one per turn.
+
+**The frontend half is a rendering rule, so a source-level test is the only kind that can hold
+it.** `tests/test_frontend_contract.py` now asserts that the answer slot is never handed
+`payload.error`, that `readAgentError` stands between the two, that the readable line is rendered
+*under* the answer, and that an empty answer gets the sentence *"That question could not be
+answered just now."* rather than an exception string. `setAnswer(answer || detail || error)` is
+one token away from looking correct and no API test can see which variable a component wrote.
+
+**What a test could not have caught, and what was done about it.** The end-to-end path only
+exists in a browser, against a real key — and this sandbox cannot reach `api.groq.com`. So the
+transport is stubbed (`tests/test_providers.py` drives the real rotation code with a fake 404
+body) and the fallback was exercised by hand with a deliberately unreachable key:
+`SAROS_LLM=groq GROQ_API_KEY=gsk-fake` answers, shows no error string, prints the one-line
+notice, and `GET /api/v1/agent` returns `"degraded": true` with the reason.
+
+**Follow-on, because "with what file?" was the other half of the report.** The bug was reported
+alongside *"the site gets shabby when someone new is looking into it"*, and asking a stranger for
+a CSV in a schema they have never seen is the same problem in a quieter form. `samples/` now
+holds one file per body, generated by `scripts/make_samples.py` **through each body's own loader
+or generator** so the columns cannot drift from what the models expect: real telco subscribers, a
+real FD001-layout telemetry file (26 columns, no header), price/demand history, Pima screenings,
+a policy document with deadlines and a numbered exception list, and five allowlisted URLs.
+`python scripts/make_samples.py --verify` pushes all eight through the real `analyze_upload`, and
+`tests/test_samples.py` asserts the same properties in CI — including that the FD001 sample stays
+26 columns wide, because the padding path it demonstrates would silently stop being exercised if
+someone regenerated it at the repo's own 29-column width.
+
+And the honest answer to "with what file?" is now one click rather than a directory listing:
+`GET /api/v1/samples/{module_id}` serves the committed file byte-for-byte, and the studio's
+**Use the … sample file** button wraps those bytes in a `File` and posts them to the *same*
+`/analyze` route a dropped file takes — a second, bespoke "demo" path would have been a second
+thing that can be wrong about what a body accepts. A test fetches every sample over HTTP, posts
+it back, and asserts the analysis comes out (and that the bytes are unchanged on the way out).
+The API image now copies `samples/` and `scripts/` in: about 650 KB, in exchange for a deploy
+that can answer the question with no network call at all.
+
+The upload studio also stops pretending a document is a table: a document upload now uses the
+single-column results layout and says *"A document, not a table: chunked heading-wise…"* once,
+instead of rendering a 340px column-mapping cell holding one sentence beside a dense results
+column. That panel was correct and the layout was wrong, which is exactly the kind of thing only
+a screenshot catches.

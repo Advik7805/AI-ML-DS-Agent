@@ -110,3 +110,63 @@ def test_the_upload_studio_offers_every_body() -> None:
     source = read("components/hub/UploadStudio.tsx")
     assert "modules.map" in source, "the body picker must render whatever the API discovered"
     assert "/analyze" in source, "the studio must post to the body's analyze route"
+
+
+# --- 3. an error is not an answer ------------------------------------------------------------
+
+
+def without_comments(source: str) -> str:
+    """Source with its `//` and `/* */` comments removed.
+
+    The "must not appear" assertions below look at code only: the comment next to the fix quotes
+    the old buggy line for the next reader, and a comment describing a bug is documentation
+    rather than a regression.
+    """
+    source = re.sub(r"/\*.*?\*/", "", source, flags=re.S)
+    return "\n".join(re.sub(r"//.*$", "", line) for line in source.splitlines())
+
+
+def test_the_ui_never_renders_a_raw_provider_error() -> None:
+    """A retired model reached a visitor as `RuntimeError: Groq 404: {"error":{...}}`.
+
+    Source-level assertions on purpose. The bug was a *rendering* decision — the old line
+    ``setAnswer(payload.answer || payload.detail || payload.error || ...)`` is one token away
+    from looking reasonable, and no amount of API testing can see which variable a component
+    writes an error into. `readAgentError` is the one place that turns a vendor failure into a
+    sentence, and both components must route through it.
+    """
+    helper = read("lib/agentError.ts")
+    assert "export function readAgentError" in helper, "the one readable-error helper is missing"
+    assert "Underneath:" in helper, "the vendor's own words must survive as evidence"
+
+    studio = read("components/hub/UploadStudio.tsx")
+    assert "@/lib/agentError" in studio, "the upload studio must use the shared error reader"
+    assert (
+        "setAnswer(payload.answer || payload.detail || payload.error" not in without_comments(studio)
+    ), "the answer slot must never be handed a raw error — that is the bug, verbatim"
+    assert "setAnswerError(readAgentError(payload.error))" in studio
+    assert "{answerError &&" in studio, "the readable reason must be rendered, not just stored"
+
+    chat = read("components/hub/AgentChat.tsx")
+    assert "@/lib/agentError" in chat
+    assert "readAgentError(res.error) || null" in chat
+    assert "That question could not be answered just now." in chat, (
+        "an empty answer needs a sentence of its own, not an error string as the bubble"
+    )
+    assert "The agent is unreachable right now." in chat
+
+
+def test_the_studio_can_load_a_sample_instead_of_a_file() -> None:
+    """Asking a stranger for a CSV in a schema they have never seen is a demand, not an invite.
+
+    The button exists so the honest answer to "with what file?" is one click — and it must send
+    the fetched bytes through `upload()`, the same path a dropped file takes, or the sample stops
+    proving anything about what a user's own file will do.
+    """
+    source = read("components/hub/UploadStudio.tsx")
+    assert "/api/v1/samples/${moduleId}" in source, "the button must fetch the body's sample"
+    assert "new File(" in source, "the fetched bytes become a File, not a bespoke scoring call"
+    assert re.search(r"await upload\(new File", source), (
+        "the sample must go through the same upload path as a dropped file"
+    )
+    assert "Content-Disposition" in source, "the file must keep the name the API served it under"

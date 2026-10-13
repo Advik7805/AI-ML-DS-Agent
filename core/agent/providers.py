@@ -1,6 +1,6 @@
 """LLM providers for the hub agent.
 
-One protocol, four implementations:
+One protocol, five implementations:
 
 - ``MockProvider``   — deterministic, no network, no keys. Used by the test suite and by the
   demo so the *whole* agent loop (plan → tool → observe → synthesise) is exercisable offline.
@@ -9,6 +9,8 @@ One protocol, four implementations:
 - ``GroqProvider``   — OpenAI-compatible ``/chat/completions``, free tier.
 - ``GeminiProvider`` — Google's REST API, free tier.
 - ``EchoProvider``   — never calls anything; useful for isolating graph bugs.
+- ``FallbackProvider`` — wraps one of the above so a vendor outage degrades into a templated but
+  *labelled* answer instead of an exception where the answer belongs.
 
 Selection is by env var, and the **default is ``auto``**: a real model when a key is present, the
 labelled mock when none is. That default matters, because the failure it prevents is invisible.
@@ -17,13 +19,27 @@ provider while the integrations panel reported Groq as live — the product look
 only clue was a badge nobody read.
 
     SAROS_LLM=auto | groq | gemini | mock | echo      # auto is the default
-    GROQ_API_KEY=...
-    GEMINI_API_KEY=...
+    GROQ_API_KEY=...      GROQ_MODEL=...              # first candidate, optional
+    GEMINI_API_KEY=...    GEMINI_MODEL=...            # first candidate, optional
+
+**Model IDs are a moving target, and the failure mode is ugly.** ``llama-3.3-70b-versatile`` was
+retired on 2026-08-16 and ``gemini-2.0-flash`` on 2026-06-01; each was the hardcoded default
+here, so each retirement turned a working hub into a raw vendor 404 rendered where the answer
+belongs — in front of a first-time visitor. Every live provider therefore carries an *ordered
+candidate list* (:data:`GROQ_MODELS`, :data:`GEMINI_MODELS`, with the deploy's own ``*_MODEL``
+first) and walks it when, and only when, the error says the model itself is gone. A bad key, a
+rate limit or a network fault is not fixed by naming a different model, so those raise on the
+first failure rather than burning several requests of a free tier to reach the same wall.
 
 ``auto`` resolves in this order: Groq, then Gemini, then mock. An explicit ``SAROS_LLM`` always
 wins, including ``SAROS_LLM=mock``, which is how you demo the deterministic path deliberately
-rather than by accident. If a key is present but rejected by the vendor, the failure surfaces at
-call time as a readable error — it does not silently downgrade to the mock mid-conversation.
+rather than by accident. A live provider is wrapped in :class:`FallbackProvider`, and the
+fallback is **loud**: the deterministic mock answers, and the answer carries a one-line notice
+naming the provider that failed, the readable reason, and the fact that the tool results are real
+while the wording is templated. The previous design promised that a rejected key "surfaces at
+call time as a readable error" rather than silently downgrading. That promise is what cost the
+demo: a readable error is still an error, and a visitor read a stack trace instead of an answer.
+Degrading into a labelled sentence is the lesser failure, and it is the one we chose.
 
 Groq and Gemini are called over plain HTTP rather than through their SDKs: two fewer heavy
 dependencies in an image that has to fit in 512 MB on a free tier.
@@ -416,6 +432,117 @@ class MockProvider:
         return {k: v for k, v in args.items() if k in props}
 
 
+# --- model candidates, retirement and readable failures -----------------------
+
+#: Vendor-tested Groq models, best first. ``openai/gpt-oss-120b`` is the replacement Groq itself
+#: recommends now that ``llama-3.3-70b-versatile`` is gone (retired 2026-08-16 for free and
+#: developer tiers). The small model is last: it is a fallback, not a preference.
+GROQ_MODELS: tuple[str, ...] = ("openai/gpt-oss-120b", "qwen/qwen3.6-27b", "openai/gpt-oss-20b")
+#: Gemini, same rule. ``gemini-2.0-flash`` was shut down on 2026-06-01.
+GEMINI_MODELS: tuple[str, ...] = ("gemini-3.8-flash", "gemini-3.5-flash", "gemini-2.5-flash")
+
+#: What a vendor says when the *model* is the problem rather than the request. Retrying the next
+#: candidate is the right response to these and to nothing else.
+_MODEL_GONE = re.compile(
+    r"model_not_found|does not exist|decommission|deprecated|unknown model|invalid model",
+    re.IGNORECASE,
+)
+
+#: Exception prefixes an error picks up on its way out of a traceback (``RuntimeError: ...``).
+_PREFIX = re.compile(r"^(?:[A-Za-z_][\w.]*(?:Error|Exception))\s*:\s*")
+
+
+def _dedupe(*models: str) -> tuple[str, ...]:
+    """Ordered, de-duplicated, blanks dropped. Order *is* the retry policy, so it is preserved."""
+    out: list[str] = []
+    for model in models:
+        model = (model or "").strip()
+        if model and model not in out:
+            out.append(model)
+    return tuple(out)
+
+
+def _candidates(env_var: str, defaults: tuple[str, ...]) -> tuple[str, ...]:
+    """The deploy's explicit ``*_MODEL`` first, then the built-in defaults, de-duplicated.
+
+    An explicitly pinned model wins over ours: a deploy that chose one has a reason, and quietly
+    preferring a default over that choice is how a working configuration stops working.
+    """
+    return _dedupe(os.getenv(env_var, ""), *defaults)
+
+
+def _model_is_gone(status: int, text: str) -> bool:
+    """Is this failure "that model does not exist" rather than "your request is wrong"?
+
+    404 is unambiguous. 400 is not: some vendors answer a retired model with a bad-request code,
+    and the body is the only thing that separates that from a genuinely malformed call — which
+    must *not* be re-sent to three models just because there are three of them.
+    """
+    if status == 404:
+        return True
+    return status == 400 and bool(_MODEL_GONE.search(text))
+
+
+def _message_from(payload: Any) -> str | None:
+    """Whichever key the vendor used for "here is what actually went wrong"."""
+    if not isinstance(payload, dict):
+        return None
+    error = payload.get("error")
+    for candidate in (
+        error.get("message") if isinstance(error, dict) else None,
+        payload.get("message"),
+        error if isinstance(error, str) else None,
+        payload.get("detail"),
+    ):
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    return None
+
+
+def readable_provider_error(raw: str) -> str:
+    """A vendor failure as one line a person can act on — never as a stack trace.
+
+    A raw provider error arrives as
+    ``RuntimeError: Groq 404: {"error":{"message":"...","type":"invalid_request_error"}}``: an
+    exception prefix wrapped around a JSON envelope. Both halves are noise to a reader, and the
+    point of this function is that this string never reaches a page again. It is also what the
+    API's ``/api/v1/agent`` note and the browser's ``readAgentError`` build on, so all three
+    surfaces describe one failure the same way.
+    """
+    text = " ".join(str(raw or "").split())
+    if not text:
+        return ""
+    text = _PREFIX.sub("", text)
+    start = text.find("{")
+    if start >= 0:
+        try:
+            payload = json.loads(text[start:])
+        except ValueError:  # not JSON after all — leave the text as it came
+            payload = None
+        message = _message_from(payload)
+        if message:
+            text = f"{text[:start]}{message}"
+    text = _PREFIX.sub("", text).strip()
+    if len(text) > 180:
+        text = text[:177].rstrip() + "…"
+    return text
+
+
+class _ProviderHTTPError(RuntimeError):
+    """An HTTP failure that keeps its status and body.
+
+    The status is what decides whether another model is worth trying, and it cannot be recovered
+    from a formatted string. ``str(exc)`` still reads ``Groq 404: {...}`` — the exact text a user
+    saw before any of this existed, which is what the tests pin.
+    """
+
+    def __init__(self, provider: str, status: int, text: str) -> None:
+        super().__init__(f"{provider} {status}: {text}")
+        self.provider = provider
+        self.status = status
+        self.text = text
+
+
 # --- real providers ----------------------------------------------------------
 
 
@@ -464,16 +591,57 @@ class GroqProvider:
     name = "groq"
     URL = "https://api.groq.com/openai/v1/chat/completions"
 
-    def __init__(self, api_key: str | None = None, model: str = "llama-3.3-70b-versatile", timeout: float = 60.0):
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str | None = None,
+        timeout: float = 60.0,
+        models: tuple[str, ...] | None = None,
+    ) -> None:
         self.api_key = api_key or os.getenv("GROQ_API_KEY", "")
-        self.model = os.getenv("GROQ_MODEL", model)
         self.timeout = timeout
+        # The candidate list, in retry order: an explicit argument, then GROQ_MODEL, then the
+        # defaults. Anyone who passes `models=` is stating the whole policy, so it is not merged.
+        if models is None:
+            models = (model, *_candidates("GROQ_MODEL", GROQ_MODELS))
+        self.models = _dedupe(*models) or GROQ_MODELS
+        self.model = self.models[0]
         if not self.api_key:
             raise RuntimeError("GROQ_API_KEY is not set.")
 
+    def _order(self) -> list[str]:
+        """The candidates, with the last model that worked first.
+
+        A provider object outlives a single request, so after a rotation this makes the next turn
+        start at the model known to work: a retired ID costs one wasted request per deploy, not
+        one per turn, which on a free tier is the difference between a demo and a quota error.
+        """
+        try:
+            index = self.models.index(self.model)
+        except ValueError:  # pragma: no cover - only if something set `model` from outside
+            index = 0
+        return list(self.models[index:] + self.models[:index])
+
     def complete(self, messages: list[Message], tools: list[AgentTool]) -> Message:
+        last: RuntimeError | None = None
+        for model in self._order():
+            try:
+                reply = self._complete(model, messages, tools)
+            except _ProviderHTTPError as exc:
+                last = exc
+                if not _model_is_gone(exc.status, exc.text):
+                    # A bad key or a rate limit is not fixed by another model, and retrying
+                    # burns the free tier to reach the same wall.
+                    raise
+                continue
+            self.model = model
+            return reply
+        assert last is not None  # `_order()` is never empty: the constructor guarantees a default
+        raise last
+
+    def _complete(self, model: str, messages: list[Message], tools: list[AgentTool]) -> Message:
         payload: dict[str, Any] = {
-            "model": self.model,
+            "model": model,
             "messages": _openai_messages(messages),
             "temperature": 0.2,
         }
@@ -488,7 +656,7 @@ class GroqProvider:
             timeout=self.timeout,
         )
         if res.status_code >= 400:
-            raise RuntimeError(f"Groq {res.status_code}: {res.text[:400]}")
+            raise _ProviderHTTPError("Groq", res.status_code, res.text[:400])
         choice = res.json()["choices"][0]["message"]
 
         calls = []
@@ -507,14 +675,48 @@ class GeminiProvider:
     name = "gemini"
     URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
-    def __init__(self, api_key: str | None = None, model: str = "gemini-2.0-flash", timeout: float = 60.0):
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str | None = None,
+        timeout: float = 60.0,
+        models: tuple[str, ...] | None = None,
+    ) -> None:
         self.api_key = api_key or os.getenv("GEMINI_API_KEY", "")
-        self.model = os.getenv("GEMINI_MODEL", model)
         self.timeout = timeout
+        # Same retry order as Groq: an explicit argument, then GEMINI_MODEL, then the defaults.
+        # Anyone who passes `models=` is stating the whole policy, so it is not merged.
+        if models is None:
+            models = (model, *_candidates("GEMINI_MODEL", GEMINI_MODELS))
+        self.models = _dedupe(*models) or GEMINI_MODELS
+        self.model = self.models[0]
         if not self.api_key:
             raise RuntimeError("GEMINI_API_KEY is not set.")
 
+    def _order(self) -> list[str]:
+        """Same rotation rule as Groq — see :meth:`GroqProvider._order`."""
+        try:
+            index = self.models.index(self.model)
+        except ValueError:  # pragma: no cover - only if something set `model` from outside
+            index = 0
+        return list(self.models[index:] + self.models[:index])
+
     def complete(self, messages: list[Message], tools: list[AgentTool]) -> Message:
+        last: RuntimeError | None = None
+        for model in self._order():
+            try:
+                reply = self._complete(model, messages, tools)
+            except _ProviderHTTPError as exc:
+                last = exc
+                if not _model_is_gone(exc.status, exc.text):
+                    raise
+                continue
+            self.model = model
+            return reply
+        assert last is not None  # `_order()` is never empty: the constructor guarantees a default
+        raise last
+
+    def _complete(self, model: str, messages: list[Message], tools: list[AgentTool]) -> Message:
         contents = []
         system = ""
         for m in messages:
@@ -554,13 +756,13 @@ class GeminiProvider:
             ]
 
         res = httpx.post(
-            self.URL.format(model=self.model),
+            self.URL.format(model=model),
             params={"key": self.api_key},
             json=body,
             timeout=self.timeout,
         )
         if res.status_code >= 400:
-            raise RuntimeError(f"Gemini {res.status_code}: {res.text[:400]}")
+            raise _ProviderHTTPError("Gemini", res.status_code, res.text[:400])
 
         parts = (res.json().get("candidates") or [{}])[0].get("content", {}).get("parts", [])
         calls, text = [], []
@@ -581,6 +783,83 @@ class EchoProvider:
     def complete(self, messages: list[Message], tools: list[AgentTool]) -> Message:
         user = next((m.content for m in reversed(messages) if m.role == "user"), "")
         return Message(role="assistant", content=f"[echo] {user}")
+
+
+class FallbackProvider:
+    """A live provider that degrades into the deterministic one — loudly.
+
+    The failure this exists for is the one that reached a first-time visitor: Groq retired the
+    default model, the provider raised, and the raw exception was rendered *where the answer
+    belongs*. An answer built from real tool results with a templated sentence on top is a much
+    smaller lie than a stack trace, and it is a lie the reply itself confesses to.
+
+    Three properties are deliberate:
+
+    - **The notice is not optional.** Every degraded answer carries :meth:`notice`, naming the
+      provider, the readable reason, and the fact that only the wording is templated. A silent
+      downgrade would be the older bug in a new costume: the user would read a robotic answer and
+      conclude the product is bad rather than the vendor being down.
+    - **One failure per turn.** ``_skip_primary`` keeps the rest of the turn on the backup, so a
+      downed provider costs one request rather than one per plan step. :meth:`reset_turn` clears
+      it at the start of the next user turn, because the next message *should* retry: outages
+      end, quotas reset, and a process that gave up permanently would need a redeploy to recover.
+    - **Any exception degrades.** Not just HTTP errors: a DNS failure, a read timeout and a
+      malformed vendor response are all the same thing to a person waiting for an answer.
+    """
+
+    def __init__(self, primary: Provider, backup: Provider | None = None) -> None:
+        self.primary = primary
+        self.backup = backup or MockProvider()
+        #: True once this process has failed over at least once; the API reports it so the UI's
+        #: "live" badge cannot be true while a template is answering.
+        self.degraded = False
+        self.degraded_reason: str | None = None
+        self._skip_primary = False
+
+    @property
+    def name(self) -> str:
+        return getattr(self.primary, "name", type(self.primary).__name__)
+
+    @property
+    def model(self) -> str | None:
+        return getattr(self.primary, "model", None)
+
+    def reset_turn(self) -> None:
+        """Give the live provider another chance. The graph calls this once per user turn."""
+        self._skip_primary = False
+
+    def notice(self) -> str:
+        """One line: who failed, why, what is still real, and what to do about it."""
+        reason = readable_provider_error(self.degraded_reason or "") or "no readable reason"
+        if not reason.endswith((".", "!", "?")):
+            reason += "."
+        # Advice that matches the failure. Sending someone whose key was rejected to change the
+        # model ID, or someone whose model was retired to check their quota, is how a support
+        # message turns into a dead end.
+        if _MODEL_GONE.search(self.degraded_reason or ""):
+            advice = f"set {self.name.upper()}_MODEL to a model this key can reach"
+        else:
+            advice = "check that key, its quota, and this server's outbound connection"
+        return (
+            f"⚠ {self.name} could not answer ({reason}) The tool results in this reply are real; "
+            f"only the wording is templated. The next message retries automatically — to fix it "
+            f"now, {advice}."
+        )
+
+    def complete(self, messages: list[Message], tools: list[AgentTool]) -> Message:
+        if not self._skip_primary:
+            try:
+                return self.primary.complete(messages, tools)
+            except Exception as exc:  # noqa: BLE001 - every vendor failure is survivable here
+                self.degraded = True
+                self.degraded_reason = f"{type(exc).__name__}: {exc}"
+                self._skip_primary = True
+
+        answer = self.backup.complete(messages, tools)
+        # Appended, never replacing: the tool trace behind this answer is real, and the notice is
+        # the only thing separating "templated" from "plausible-looking nonsense".
+        answer.content = f"{answer.content}\n\n{self.notice()}".strip()
+        return answer
 
 
 def _safe_json(text: str) -> Any:
@@ -928,18 +1207,24 @@ def get_provider(name: str | None = None) -> Provider:
     and the hub should still be a working product rather than a 500 — but a key that *is*
     configured must never be ignored, which is what a hardcoded "mock" default did.
 
+    A live provider is wrapped in :class:`FallbackProvider`, so a vendor that is down (a retired
+    model, a spent quota, an outage) still answers: the deterministic policy answers from the
+    real tool results and the reply says what happened and who is not answering. A *missing*
+    key is different — there is nothing to fall back from — so that case stays a bare mock and
+    ``/api/v1/agent`` reports "no key configured" rather than "degraded".
+
     An explicitly named provider that cannot be constructed (``SAROS_LLM=groq`` with no key)
     degrades to the mock rather than raising, so a bad env var cannot take the hub down.
     """
     name = resolve_provider_name(name)
     if name == "groq":
         try:
-            return GroqProvider()
+            return FallbackProvider(GroqProvider())
         except RuntimeError:
             return MockProvider()
     if name == "gemini":
         try:
-            return GeminiProvider()
+            return FallbackProvider(GeminiProvider())
         except RuntimeError:
             return MockProvider()
     if name == "echo":

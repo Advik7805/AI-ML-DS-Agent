@@ -62,6 +62,7 @@ def test_the_schema_publishes_the_routes_the_frontend_calls(client) -> None:
         "/api/v1/tenant",
         "/api/v1/warmup",
         "/api/v1/runs",
+        "/api/v1/samples",
     ):
         assert required in routes, f"{required} is missing from the API"
 

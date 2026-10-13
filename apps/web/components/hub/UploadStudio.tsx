@@ -15,6 +15,7 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 
+import { readAgentError } from "@/lib/agentError";
 import { readSessionId, useSessionId } from "@/lib/session";
 import type { DatasetCard, MetricsReport, ModuleManifest, Prediction } from "@/lib/types";
 
@@ -62,6 +63,9 @@ export function UploadStudio({ modules }: { modules: ModuleManifest[] }) {
   const [asking, setAsking] = useState(false);
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState<string | null>(null);
+  // Kept apart from `answer` on purpose: an error is not an answer, and the bug that produced a
+  // stack trace on this page was exactly the two being written into the same variable.
+  const [answerError, setAnswerError] = useState<string | null>(null);
   const [progress, setProgress] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -76,6 +80,7 @@ export function UploadStudio({ modules }: { modules: ModuleManifest[] }) {
     setRejection(null);
     setFailure(null);
     setAnswer(null);
+    setAnswerError(null);
   };
 
   const upload = useCallback(
@@ -123,11 +128,39 @@ export function UploadStudio({ modules }: { modules: ModuleManifest[] }) {
     [moduleId, session],
   );
 
+  // "With what file?" — answered with a button rather than a paragraph about `samples/`. The API
+  // serves the committed sample for the selected body, and those bytes go back out through the
+  // *same* `upload()` a dragged file takes: same endpoint, same validation, same column
+  // reporting, same refusals. A sample that took a shortcut would be a sample that proves
+  // nothing about what a user's own file will do.
+  const useSample = useCallback(async () => {
+    reset();
+    setProgress("Fetching the sample file…");
+    try {
+      const res = await fetch(`/api/v1/samples/${moduleId}`);
+      if (!res.ok) {
+        const payload = (await res.json().catch(() => ({}))) as { detail?: string };
+        setFailure(payload.detail ?? `No sample file is available for ${selected?.title ?? moduleId}.`);
+        return;
+      }
+      const blob = await res.blob();
+      const filename = filenameFrom(res.headers.get("Content-Disposition")) ?? `${moduleId}-sample.csv`;
+      await upload(new File([blob], filename, { type: blob.type || "text/csv" }));
+    } catch (e) {
+      setFailure(
+        `Could not load the sample: ${e instanceof Error ? e.message : String(e)} — the API may be waking up.`,
+      );
+    } finally {
+      setProgress(null);
+    }
+  }, [moduleId, selected, upload]);
+
   const ask = useCallback(
     async (text: string) => {
       if (!text.trim() || !analysis) return;
       setAsking(true);
       setAnswer(null);
+      setAnswerError(null);
       try {
         const res = await fetch("/api/v1/agent/chat", {
           method: "POST",
@@ -135,9 +168,18 @@ export function UploadStudio({ modules }: { modules: ModuleManifest[] }) {
           body: JSON.stringify({ message: text, session_id: session || readSessionId() }),
         });
         const payload = (await res.json()) as { answer?: string; error?: string | null; detail?: string };
-        setAnswer(payload.answer || payload.detail || payload.error || "No answer returned.");
+        // `payload.error` is deliberately absent from this chain. The line used to read
+        // `setAnswer(payload.answer || payload.detail || payload.error || ...)`, which handed the
+        // answer slot to a raw `RuntimeError: Groq 404: {...}` the moment a provider failed: the
+        // reader got a stack trace where the answer belonged. The error now goes through
+        // `readAgentError` and is rendered *under* the answer, as an explanation of what happened.
+        if (payload.answer) setAnswer(payload.answer);
+        else if (payload.detail) setAnswer(payload.detail);
+        else setAnswer("The agent did not return an answer for that question.");
+        if (payload.error) setAnswerError(readAgentError(payload.error));
       } catch (e) {
-        setAnswer(`Agent unreachable: ${e instanceof Error ? e.message : String(e)}`);
+        setAnswer("The agent is unreachable right now.");
+        setAnswerError(readAgentError(e instanceof Error ? e.message : String(e)));
       } finally {
         setAsking(false);
       }
@@ -160,6 +202,14 @@ export function UploadStudio({ modules }: { modules: ModuleManifest[] }) {
       `What should I check before trusting these results?`,
     ];
   }, [analysis, selected]);
+
+  // A document has no columns, and a table that matched nothing has nothing worth a panel. Both
+  // take the single-column layout: a 340px cell holding one sentence next to a dense results
+  // column is what made a correct upload read as a broken page.
+  const hasColumnMapping =
+    !!analysis &&
+    analysis.kind !== "document" &&
+    (analysis.columns_report.matched.length > 0 || analysis.columns_report.ignored.length > 0);
 
   return (
     <div className="glass rounded-2xl p-5">
@@ -253,6 +303,27 @@ export function UploadStudio({ modules }: { modules: ModuleManifest[] }) {
         )}
       </div>
 
+      {/* "With what file?" is a real question, and the repo already answers it: `samples/` holds
+          one per body, generated through each body's own loader by scripts/make_samples.py, so
+          the columns in them cannot drift away from what the models expect. The button fetches
+          it from the API — which serves the committed file — and uploads it through the same
+          path a dropped file takes. */}
+      <div className="mt-2.5 flex flex-wrap items-center justify-center gap-2">
+        <button
+          type="button"
+          onClick={() => void useSample()}
+          disabled={busy}
+          className="rounded-full border px-3 py-1 text-[11.5px] transition disabled:opacity-40"
+          style={{ borderColor: `${accent}66`, background: `${accent}18`, color: "#e8eaf2" }}
+        >
+          {busy ? "Working…" : `Use the ${selected?.title ?? "sample"} sample file`}
+        </button>
+        <span className="text-[11px] leading-relaxed text-ink-faint">
+          from <span className="font-mono">samples/</span> ·{" "}
+          <span className="font-mono">python scripts/make_samples.py</span> regenerates them
+        </span>
+      </div>
+
       {/* --- rejection: name the columns ------------------------------------ */}
       {rejection && (
         <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 p-4">
@@ -293,34 +364,44 @@ export function UploadStudio({ modules }: { modules: ModuleManifest[] }) {
             )}
           </div>
 
-          <div className="grid gap-3 lg:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
-            <div className="rounded-xl border border-line bg-void-2/60 p-4">
-              <div className="font-mono text-[10px] uppercase tracking-wider text-ink-faint">
-                column mapping
+          {!hasColumnMapping && (
+            <p className="text-[12px] leading-relaxed text-ink-dim">
+              {analysis.kind === "document"
+                ? "A document, not a table: chunked heading-wise and added to this session's knowledge overlay."
+                : "No columns in this file matched this body's schema, so there is no mapping to show."}
+            </p>
+          )}
+
+          <div
+            className={
+              hasColumnMapping
+                ? "grid gap-3 lg:grid-cols-[minmax(0,340px)_minmax(0,1fr)]"
+                : "space-y-3"
+            }
+          >
+            {hasColumnMapping && (
+              <div className="rounded-xl border border-line bg-void-2/60 p-4">
+                <div className="font-mono text-[10px] uppercase tracking-wider text-ink-faint">
+                  column mapping
+                </div>
+                <div className="mt-3 space-y-3">
+                  {analysis.columns_report.matched.length > 0 && (
+                    <ColumnList
+                      title={`used by the model (${analysis.columns_report.matched.length})`}
+                      columns={analysis.columns_report.matched}
+                      tone="#6ee7b7"
+                    />
+                  )}
+                  {analysis.columns_report.ignored.length > 0 && (
+                    <ColumnList
+                      title={`present but ignored (${analysis.columns_report.ignored.length})`}
+                      columns={analysis.columns_report.ignored}
+                      tone="var(--color-ink-faint)"
+                    />
+                  )}
+                </div>
               </div>
-              <div className="mt-3 space-y-3">
-                {analysis.columns_report.matched.length > 0 && (
-                  <ColumnList
-                    title={`used by the model (${analysis.columns_report.matched.length})`}
-                    columns={analysis.columns_report.matched}
-                    tone="#6ee7b7"
-                  />
-                )}
-                {analysis.columns_report.ignored.length > 0 && (
-                  <ColumnList
-                    title={`present but ignored (${analysis.columns_report.ignored.length})`}
-                    columns={analysis.columns_report.ignored}
-                    tone="var(--color-ink-faint)"
-                  />
-                )}
-                {analysis.columns_report.matched.length === 0 && analysis.kind === "document" && (
-                  <p className="text-[11.5px] text-ink-dim">
-                    A document, not a table: chunked heading-wise and added to this session&rsquo;s
-                    knowledge overlay.
-                  </p>
-                )}
-              </div>
-            </div>
+            )}
 
             <div className="space-y-3">
               {analysis.metrics && (
@@ -459,6 +540,11 @@ export function UploadStudio({ modules }: { modules: ModuleManifest[] }) {
                 {answer}
               </div>
             )}
+            {/* Below the answer, small and muted: an explanation of what went wrong, never a
+                substitute for the answer itself. */}
+            {answerError && (
+              <p className="mt-1.5 text-[11px] leading-relaxed text-ink-faint">{answerError}</p>
+            )}
           </div>
 
           {analysis.notes.length > 0 && (
@@ -474,6 +560,12 @@ export function UploadStudio({ modules }: { modules: ModuleManifest[] }) {
       )}
     </div>
   );
+}
+
+/** The filename the API sent, so the result panel names a real file rather than "blob". */
+function filenameFrom(disposition: string | null): string | null {
+  const match = disposition?.match(/filename="?([^";]+)"?/i);
+  return match ? match[1] : null;
 }
 
 function ColumnList({ title, columns, tone }: { title: string; columns: string[]; tone: string }) {
