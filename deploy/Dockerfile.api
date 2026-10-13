@@ -3,7 +3,7 @@
 # heavy framework should get its own image rather than making every other body pay for it in
 # cold-start time.
 #
-# The build context is trimmed by .dockerignore from ~880 MB to under half a megabyte. Without it
+# The build context is trimmed by .dockerignore from ~880 MB to under a megabyte. Without it
 # every build re-uploads the frontend's node_modules (~634 MB) and the generated model pickles
 # (~10 MB), none of which this image uses. Baking pickles in would also mean shipping a model
 # trained on whoever's laptop built the image.
@@ -23,6 +23,12 @@ COPY modules/ modules/
 COPY flows/ flows/
 COPY apps/ apps/
 COPY data/fetch.sh data/
+# `samples/` and `scripts/` are ~650 KB of committed data files, served verbatim by
+# GET /api/v1/samples/{module_id} — the "use a sample file" button in the upload studio. Baking
+# them in is what lets a deploy answer "with what file?" without a network call, and they are
+# *generated through each body's own loader*, so they cannot drift from what the bodies accept.
+COPY samples/ samples/
+COPY scripts/ scripts/
 COPY pyproject.toml .
 
 # Real dataset, baked in. Keeps the container honest about what it was trained on and avoids

@@ -356,6 +356,15 @@ a policy document with deadlines and a numbered exception list, and five allowli
 26 columns wide, because the padding path it demonstrates would silently stop being exercised if
 someone regenerated it at the repo's own 29-column width.
 
+And the honest answer to "with what file?" is now one click rather than a directory listing:
+`GET /api/v1/samples/{module_id}` serves the committed file byte-for-byte, and the studio's
+**Use the … sample file** button wraps those bytes in a `File` and posts them to the *same*
+`/analyze` route a dropped file takes — a second, bespoke "demo" path would have been a second
+thing that can be wrong about what a body accepts. A test fetches every sample over HTTP, posts
+it back, and asserts the analysis comes out (and that the bytes are unchanged on the way out).
+The API image now copies `samples/` and `scripts/` in: about 650 KB, in exchange for a deploy
+that can answer the question with no network call at all.
+
 The upload studio also stops pretending a document is a table: a document upload now uses the
 single-column results layout and says *"A document, not a table: chunked heading-wise…"* once,
 instead of rendering a 340px column-mapping cell holding one sentence beside a dense results

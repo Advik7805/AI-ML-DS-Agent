@@ -128,6 +128,33 @@ export function UploadStudio({ modules }: { modules: ModuleManifest[] }) {
     [moduleId, session],
   );
 
+  // "With what file?" — answered with a button rather than a paragraph about `samples/`. The API
+  // serves the committed sample for the selected body, and those bytes go back out through the
+  // *same* `upload()` a dragged file takes: same endpoint, same validation, same column
+  // reporting, same refusals. A sample that took a shortcut would be a sample that proves
+  // nothing about what a user's own file will do.
+  const useSample = useCallback(async () => {
+    reset();
+    setProgress("Fetching the sample file…");
+    try {
+      const res = await fetch(`/api/v1/samples/${moduleId}`);
+      if (!res.ok) {
+        const payload = (await res.json().catch(() => ({}))) as { detail?: string };
+        setFailure(payload.detail ?? `No sample file is available for ${selected?.title ?? moduleId}.`);
+        return;
+      }
+      const blob = await res.blob();
+      const filename = filenameFrom(res.headers.get("Content-Disposition")) ?? `${moduleId}-sample.csv`;
+      await upload(new File([blob], filename, { type: blob.type || "text/csv" }));
+    } catch (e) {
+      setFailure(
+        `Could not load the sample: ${e instanceof Error ? e.message : String(e)} — the API may be waking up.`,
+      );
+    } finally {
+      setProgress(null);
+    }
+  }, [moduleId, selected, upload]);
+
   const ask = useCallback(
     async (text: string) => {
       if (!text.trim() || !analysis) return;
@@ -276,14 +303,26 @@ export function UploadStudio({ modules }: { modules: ModuleManifest[] }) {
         )}
       </div>
 
-      {/* "With what file?" is a real question and the repo already answers it: `samples/` holds one
-          per body, generated through each body's own loader by scripts/make_samples.py, so the
-          columns in them cannot drift away from what the models expect. */}
-      <p className="mt-2 text-center text-[11px] leading-relaxed text-ink-faint">
-        No file of your own? Every body has one in <span className="font-mono">samples/</span> —
-        regenerate them any time with{" "}
-        <span className="font-mono">python scripts/make_samples.py</span>.
-      </p>
+      {/* "With what file?" is a real question, and the repo already answers it: `samples/` holds
+          one per body, generated through each body's own loader by scripts/make_samples.py, so
+          the columns in them cannot drift away from what the models expect. The button fetches
+          it from the API — which serves the committed file — and uploads it through the same
+          path a dropped file takes. */}
+      <div className="mt-2.5 flex flex-wrap items-center justify-center gap-2">
+        <button
+          type="button"
+          onClick={() => void useSample()}
+          disabled={busy}
+          className="rounded-full border px-3 py-1 text-[11.5px] transition disabled:opacity-40"
+          style={{ borderColor: `${accent}66`, background: `${accent}18`, color: "#e8eaf2" }}
+        >
+          {busy ? "Working…" : `Use the ${selected?.title ?? "sample"} sample file`}
+        </button>
+        <span className="text-[11px] leading-relaxed text-ink-faint">
+          from <span className="font-mono">samples/</span> ·{" "}
+          <span className="font-mono">python scripts/make_samples.py</span> regenerates them
+        </span>
+      </div>
 
       {/* --- rejection: name the columns ------------------------------------ */}
       {rejection && (
@@ -521,6 +560,12 @@ export function UploadStudio({ modules }: { modules: ModuleManifest[] }) {
       )}
     </div>
   );
+}
+
+/** The filename the API sent, so the result panel names a real file rather than "blob". */
+function filenameFrom(disposition: string | null): string | null {
+  const match = disposition?.match(/filename="?([^";]+)"?/i);
+  return match ? match[1] : null;
 }
 
 function ColumnList({ title, columns, tone }: { title: string; columns: string[]; tone: string }) {

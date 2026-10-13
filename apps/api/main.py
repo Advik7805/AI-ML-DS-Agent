@@ -12,10 +12,13 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 import json
+import mimetypes
 import os
+from pathlib import Path
+import sys
 from typing import Any
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -376,6 +379,115 @@ async def analyze_upload(
         )
     )
     return result
+
+
+# --- committed sample data ------------------------------------------------------
+
+#: The checkout root: `apps/api/main.py` -> `apps/api` -> `apps` -> the repository.
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _sample_index() -> list[dict[str, Any]]:
+    """What ``samples/`` holds, described by the script that generates it.
+
+    The generator is imported lazily and defensively. It is a development script, and this is
+    the gateway: a deployment that shipped without ``scripts/`` or ``samples/`` must still boot
+    and answer every other route, with a sentence where the sample would have been — never a 500
+    (the rule ``tests/test_routes.py`` exists to enforce, after a route once returned exactly
+    that).
+    """
+    if str(PROJECT_ROOT) not in sys.path:
+        sys.path.insert(0, str(PROJECT_ROOT))
+    try:
+        from scripts.make_samples import SAMPLES_LIST
+    except Exception:  # noqa: BLE001 - any failure here means "this image ships no samples"
+        return []
+
+    out: list[dict[str, Any]] = []
+    for sample in SAMPLES_LIST:
+        path = PROJECT_ROOT / "samples" / sample.relative
+        out.append(
+            {
+                "module_id": sample.module_id,
+                "filename": path.name,
+                "path": f"samples/{sample.relative}",
+                "what": sample.what,
+                "bytes": path.stat().st_size if path.exists() else 0,
+                "available": path.exists(),
+            }
+        )
+    return out
+
+
+@app.get("/api/v1/samples")
+def list_samples() -> dict[str, Any]:
+    """One sample file per body, so "drop a file" has an answer when you have not got one.
+
+    They are committed, so serving them costs nothing — and `tests/test_samples.py` pushes every
+    one of them through its body's own `analyze_upload`, which is what makes "known to be
+    accepted" a claim rather than a hope.
+    """
+    samples = _sample_index()
+    if not samples:
+        return {
+            "samples": [],
+            "generator": "python scripts/make_samples.py",
+            "note": (
+                "This deployment serves no samples (samples/ is not present in the image). Run "
+                "`python scripts/make_samples.py` in a checkout, or upload a file of your own."
+            ),
+        }
+    return {
+        "samples": samples,
+        "generator": "python scripts/make_samples.py",
+        "note": (
+            "Each file is produced by its body's own loader or generator, so its columns cannot "
+            "drift from what that body's model expects. GET /api/v1/samples/{module_id} returns "
+            "one as a file; where a body has two (maintenance: telemetry with and without a "
+            "header), this list is the index of both."
+        ),
+    }
+
+
+@app.get("/api/v1/samples/{module_id}")
+def get_sample(module_id: str) -> Response:
+    """The committed sample for this body, as a file the studio can upload unchanged.
+
+    Raw bytes with the filename in ``Content-Disposition``, deliberately: the browser wraps them
+    in a ``File`` and posts them to the same ``/analyze`` route a dropped file takes. A JSON
+    envelope the UI unpacks, or a client-side demo that scores without uploading, would be a
+    second code path — and a second code path is a second thing that can be wrong about what the
+    body accepts.
+    """
+    samples = _sample_index()
+    if not samples:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "This deployment serves no samples (samples/ is not present in the image). "
+                "Run `python scripts/make_samples.py` in a checkout, or upload your own file."
+            ),
+        )
+    matches = [s for s in samples if s["module_id"] == module_id and s["available"]]
+    if not matches:
+        known = sorted({s["module_id"] for s in samples if s["available"]})
+        raise HTTPException(
+            status_code=404,
+            detail=f"No sample file for '{module_id}'. Available: {', '.join(known) or 'none'}.",
+        )
+
+    sample = matches[0]
+    path = PROJECT_ROOT / sample["path"]
+    return Response(
+        content=path.read_bytes(),
+        media_type=mimetypes.guess_type(path.name)[0] or "application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{path.name}"',
+            # Which committed file this actually is — for the tests, and for anyone reading a
+            # network tab and wondering what the button just downloaded.
+            "X-Saros-Sample": sample["path"],
+        },
+    )
 
 
 @app.get("/api/v1/sessions/{session_id}")

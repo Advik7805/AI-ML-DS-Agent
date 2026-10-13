@@ -154,3 +154,19 @@ def test_the_ui_never_renders_a_raw_provider_error() -> None:
         "an empty answer needs a sentence of its own, not an error string as the bubble"
     )
     assert "The agent is unreachable right now." in chat
+
+
+def test_the_studio_can_load_a_sample_instead_of_a_file() -> None:
+    """Asking a stranger for a CSV in a schema they have never seen is a demand, not an invite.
+
+    The button exists so the honest answer to "with what file?" is one click — and it must send
+    the fetched bytes through `upload()`, the same path a dropped file takes, or the sample stops
+    proving anything about what a user's own file will do.
+    """
+    source = read("components/hub/UploadStudio.tsx")
+    assert "/api/v1/samples/${moduleId}" in source, "the button must fetch the body's sample"
+    assert "new File(" in source, "the fetched bytes become a File, not a bespoke scoring call"
+    assert re.search(r"await upload\(new File", source), (
+        "the sample must go through the same upload path as a dropped file"
+    )
+    assert "Content-Disposition" in source, "the file must keep the name the API served it under"

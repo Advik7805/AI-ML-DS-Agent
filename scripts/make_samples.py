@@ -265,9 +265,10 @@ it belongs to, because every file is produced by that body's own loader or gener
    Run `bash data/fetch.sh` first for the real telco and Pima samples.
 2. Check every file still uploads: `python scripts/make_samples.py --verify` — it pushes each one
    through the same `analyze_upload` the API uses and prints accepted/rejected per file.
-3. In the hub, choose a body under *Analyze your data*, drop the matching file, then ask the
-   agent about it in the box underneath. A file dropped here is visible to the agent in the same
-   conversation and is never written to disk.
+3. In the hub, choose a body under *Analyze your data* and press **Use the … sample file** —
+   the studio fetches the committed file from `GET /api/v1/samples/{module_id}` and uploads it
+   through the same path a dropped file takes. Or drop one of these files yourself; either way
+   the file is visible to the agent in the same conversation and is never written to disk.
 
 Files are committed so the numbers in them are the numbers in this table. Nothing in `samples/`
 is loaded by the test suite except `tests/test_samples.py`, which asserts exactly the properties
@@ -280,7 +281,10 @@ def write_readme() -> Path:
         f"| [`{s.relative}`]({s.relative}) | `{s.module_id}` | {s.what} |" for s in SAMPLES_LIST
     )
     path = SAMPLES / "README.md"
-    path.write_text(README.format(table=rows))
+    # `str.replace` rather than `str.format`: this text names a route,
+    # `GET /api/v1/samples/{module_id}`, and `format()` would read that as a field and raise
+    # KeyError. Documenting the API inside a template should not require escaping the API.
+    path.write_text(README.replace("{table}", rows))
     return path
 
 

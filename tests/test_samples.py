@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 
 from core.sessions import MAX_FILE_BYTES, Session
-from scripts.make_samples import SAMPLES_LIST
+from scripts.make_samples import SAMPLES_LIST, Sample
 
 SAMPLES = Path(__file__).resolve().parents[1] / "samples"
 README = SAMPLES / "README.md"
@@ -89,3 +89,81 @@ def test_the_churn_sample_carries_its_label() -> None:
     assert "churn" in df.columns
     assert set(df["churn"].unique()) <= {0, 1}, "the label must stay binary, as the body's is"
     assert 0 < df["churn"].mean() < 1, "one class only would make the metrics undefined"
+
+
+# --- the route that serves them -------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def client():
+    """The real gateway over HTTP, not a mock of it: the button's behaviour *is* this route."""
+    from fastapi.testclient import TestClient
+
+    from apps.api.main import app, registry
+
+    if len(registry) == 0:
+        registry.discover("modules")
+    with TestClient(app) as c:
+        yield c
+
+
+def _first_sample_per_body() -> dict[str, Sample]:
+    """Which file ``GET /api/v1/samples/{module_id}`` serves when a body has two of them.
+
+    The maintenance body ships both telemetry layouts; the route serves the canonical one and the
+    listing endpoint indexes both, so this maps body -> the file the route is expected to return.
+    """
+    first: dict[str, Sample] = {}
+    for sample in SAMPLES_LIST:
+        first.setdefault(sample.module_id, sample)
+    return first
+
+
+def test_the_api_serves_the_committed_bytes_for_every_body(client) -> None:
+    """A fetched sample must be byte-identical to the verified one.
+
+    Anything that transforms the file on the way out — a JSON wrapper, a re-encode — would mean
+    the button's file is not the file these tests check, which is the only claim that makes the
+    button worth having.
+    """
+    listed = {s["path"]: s for s in client.get("/api/v1/samples").json()["samples"]}
+    assert set(listed) == {f"samples/{s.relative}" for s in SAMPLES_LIST}
+
+    for module_id, sample in _first_sample_per_body().items():
+        r = client.get(f"/api/v1/samples/{module_id}")
+        assert r.status_code == 200, r.text
+        committed = (SAMPLES / sample.relative).read_bytes()
+        assert r.content == committed, f"{sample.relative} was served mutated"
+        assert Path(sample.relative).name in r.headers["content-disposition"]
+        assert r.headers.get("x-saros-sample") == f"samples/{sample.relative}"
+
+
+def test_a_served_sample_uploads_unchanged(client) -> None:
+    """Fetch it, post it back, get an analysis: the button's whole journey, over HTTP.
+
+    This is the end-to-end claim the button rests on — that the file the studio downloads is
+    accepted by the same route a user's own file goes to, with the same result shape.
+    """
+    session_id = "s_sampleroute01234567"
+    for module_id, sample in _first_sample_per_body().items():
+        fetched = client.get(f"/api/v1/samples/{module_id}")
+        filename = fetched.headers["content-disposition"].split("filename=")[-1].strip('"')
+        r = client.post(
+            f"/api/v1/modules/{module_id}/analyze",
+            files={"file": (filename, fetched.content, fetched.headers["content-type"])},
+            data={"session_id": session_id},
+            headers={"x-saros-session": session_id},
+        )
+        assert r.status_code == 200, f"{sample.relative}: {r.status_code} {r.text[:300]}"
+        body = r.json()
+        assert body["module_id"] == module_id
+        assert body["rows"], f"{sample.relative} produced no rows through the API"
+        assert body["filename"] == filename, "the file must keep the name it was served under"
+
+
+def test_an_unknown_body_gets_a_404_that_names_the_real_ones(client) -> None:
+    """A 404 that lists what *is* available, in the project's usual refusal style."""
+    r = client.get("/api/v1/samples/not_a_body")
+    assert r.status_code == 404
+    detail = r.json()["detail"]
+    assert "churn" in detail and "rag" in detail and "not_a_body" in detail

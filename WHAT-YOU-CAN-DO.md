@@ -16,8 +16,9 @@ Generated from the running app (API + browser checks). Every item was executed, 
 
 ## 2. Bring your own data (hub → "Your data")
 Pick any of the 7 bodies, drop a file (≤10 MB, in memory, never written to disk) — or use the
-committed one in **`samples/`**, generated per body by `scripts/make_samples.py` so it is always
-accepted (`python scripts/make_samples.py --verify` checks all eight through the real upload path):
+committed one in **`samples/`** — press **Use the … sample file** and the studio fetches it from
+`GET /api/v1/samples/{module_id}` and uploads it like any other file (`python
+scripts/make_samples.py --verify` checks all eight through the same real upload path):
 - **Churn / Fraud / Diagnostics:** CSV of your rows → real PR-AUC / ROC-AUC / precision / recall when your
   file has a label column, a distribution report (and **no** accuracy claim) when it does not.
   Column mapping shows exactly which of your columns the model used and which it ignored.
@@ -45,7 +46,8 @@ Run. All 22 tools answer (this is now a test).
 ## 5. Operate it
 - `GET /health` — instant, includes warm-up progress.
 - `GET /api/v1/warmup` — per-body warm-up result and headline metric.
-- `GET /api/v1/tenant`, `/api/v1/modules`, `/api/v1/integrations`, `/api/v1/runs`.
+- `GET /api/v1/tenant`, `/api/v1/modules`, `/api/v1/integrations`, `/api/v1/runs`, and
+  `/api/v1/samples` → `/api/v1/samples/{module_id}` for the committed sample of any body.
 - `python -m flows.train_all` retrains everything and logs the runs.
 
 ## 6. Verify a deploy in a browser (curl cannot see this)
