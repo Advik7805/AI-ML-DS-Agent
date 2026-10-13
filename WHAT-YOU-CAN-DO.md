@@ -9,9 +9,15 @@ Generated from the running app (API + browser checks). Every item was executed, 
 - The agent plans, calls tools, and shows a trace of which tools ran. Without a key it uses a
   deterministic mock that still returns **real model outputs** and says so.
 - With `GROQ_API_KEY` or `GEMINI_API_KEY` set (yours are, so this is live) it reasons in prose.
+- If a live provider fails (a retired model ID, a spent quota, an outage), the answer still comes
+  back — built from the same real tool results, with a one-line note naming the provider and the
+  reason, and a retry on your next message. `GET /api/v1/agent` reports `degraded: true` rather
+  than claiming a language model answered.
 
 ## 2. Bring your own data (hub → "Your data")
-Pick any of the 7 bodies, drop a file (≤10 MB, in memory, never written to disk):
+Pick any of the 7 bodies, drop a file (≤10 MB, in memory, never written to disk) — or use the
+committed one in **`samples/`**, generated per body by `scripts/make_samples.py` so it is always
+accepted (`python scripts/make_samples.py --verify` checks all eight through the real upload path):
 - **Churn / Fraud / Diagnostics:** CSV of your rows → real PR-AUC / ROC-AUC / precision / recall when your
   file has a label column, a distribution report (and **no** accuracy claim) when it does not.
   Column mapping shows exactly which of your columns the model used and which it ignored.

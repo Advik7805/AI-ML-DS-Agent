@@ -11,6 +11,7 @@
 import { motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 
+import { readAgentError } from "@/lib/agentError";
 import { clientFetch } from "@/lib/api";
 import { readSessionId, useSessionId } from "@/lib/session";
 
@@ -133,17 +134,24 @@ export function AgentChat() {
         ...t,
         {
           role: "assistant",
-          content: res.answer,
+          // An empty answer is not an error *string*. The bubble says what happened in a
+          // sentence, and the readable reason goes in `error`, rendered as a small muted line
+          // underneath — a raw `RuntimeError: Groq 404: {...}` used to be the whole bubble.
+          content: res.answer?.trim() ? res.answer : "That question could not be answered just now.",
           trace: res.trace,
           tools_used: res.tools_used,
           provider: res.provider,
-          error: res.error,
+          error: readAgentError(res.error) || null,
         },
       ]);
     } catch (e) {
       setTurns((t) => [
         ...t,
-        { role: "assistant", content: `Agent unreachable: ${e instanceof Error ? e.message : String(e)}`, error: "network" },
+        {
+          role: "assistant",
+          content: "The agent is unreachable right now.",
+          error: readAgentError(e instanceof Error ? e.message : String(e)) || null,
+        },
       ]);
     } finally {
       setBusy(false);
@@ -222,6 +230,11 @@ export function AgentChat() {
               }
             >
               <div className="whitespace-pre-wrap leading-relaxed text-ink">{renderMarkdown(t.content)}</div>
+
+              {/* The readable reason, under the answer and quietly — never instead of it. */}
+              {t.error && (
+                <p className="mt-1.5 text-[11px] leading-relaxed text-ink-faint">{t.error}</p>
+              )}
 
               {t.trace && t.trace.length > 0 && (
                 <details className="mt-2.5">

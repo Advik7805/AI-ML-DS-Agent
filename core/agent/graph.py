@@ -162,6 +162,19 @@ class HubAgent:
 
     # --- entry points --------------------------------------------------------
 
+    def _reset_provider(self) -> None:
+        """Give a fallback-wrapped provider a fresh chance at the start of every user turn.
+
+        ``FallbackProvider`` stays on its backup for the remainder of the turn it failed in, so a
+        downed vendor costs one wasted request per turn rather than one per plan step. The *next*
+        message is a new turn and must retry the live provider: outages end and quotas reset, and
+        a process that gave up for good would need a redeploy to recover from a 30-second blip.
+        Providers without the hook (mock, echo, a bare GroqProvider in a test) are unaffected.
+        """
+        reset = getattr(self.provider, "reset_turn", None)
+        if callable(reset):
+            reset()
+
     def run(
         self,
         user_input: str,
@@ -175,6 +188,7 @@ class HubAgent:
         the agent can answer about a file it has never been trained on, without the context
         leaking into the chat history the browser sends back.
         """
+        self._reset_provider()
         messages = [Message(role="system", content=SYSTEM_PROMPT)]
         if context:
             messages.append(Message(role="system", content=context))
@@ -208,6 +222,7 @@ class HubAgent:
         context: str | None = None,
     ):
         """Yield each node's update as it happens, so the UI can show the agent thinking."""
+        self._reset_provider()
         messages = [Message(role="system", content=SYSTEM_PROMPT)]
         if context:
             messages.append(Message(role="system", content=context))

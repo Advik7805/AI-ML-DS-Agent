@@ -135,3 +135,65 @@ def test_cors_allows_the_frontend_origin(client) -> None:
     )
     assert r.status_code in (200, 204)
     assert r.headers.get("access-control-allow-origin") in ("*", "http://localhost:3000")
+
+
+def test_the_agent_endpoint_reports_degraded_instead_of_claiming_live(client, monkeypatch) -> None:
+    """Three states, not two: live, degraded, and no key at all.
+
+    ``live: true`` is read as "a language model is reasoning about this" — so reporting it while
+    a template answers is the same lie as the old "Groq is live" badge next to a mock chat. A
+    deployment whose provider has failed must say so, with the vendor's own sentence, or the
+    person reading it cannot tell a bad answer from a broken deployment.
+    """
+    import apps.api.main as api
+    from core.agent.graph import HubAgent
+    from core.agent.providers import FallbackProvider, Message, MockProvider
+
+    original = api.agent
+    assert original is not None
+
+    def info_for(provider) -> dict:
+        monkeypatch.setattr(api, "agent", HubAgent(original.registry, provider))
+        return client.get("/api/v1/agent").json()
+
+    class WorkingGroq:
+        """A live provider that answers — the state the badge is *supposed* to call live."""
+
+        name = "groq"
+        model = "openai/gpt-oss-120b"
+
+        def complete(self, messages, tools):  # noqa: ANN001, ANN201 - protocol shape
+            return Message(role="assistant", content="answered")
+
+    class RetiredGroq(WorkingGroq):
+        """The deploy from the screenshot: key present, model retired, 404 on every call."""
+
+        model = "llama-3.3-70b-versatile"
+
+        def complete(self, messages, tools):  # noqa: ANN001, ANN201
+            raise RuntimeError(
+                'Groq 404: {"error":{"message":"The model llama-3.3-70b-versatile does not exist '
+                'or you do not have access to it.","type":"invalid_request_error",'
+                '"code":"model_not_found"}}'
+            )
+
+    live = info_for(FallbackProvider(WorkingGroq()))
+    assert live["live"] is True and live["degraded"] is False and live["note"] is None
+    assert live["provider_model"] == "openai/gpt-oss-120b"
+
+    mock = info_for(MockProvider())
+    assert mock["live"] is False and mock["degraded"] is False
+    assert "no LLM key is configured" in mock["note"]
+
+    degraded_provider = FallbackProvider(RetiredGroq(), backup=MockProvider())
+    # One answer through it is enough to fail over; the endpoint then has to report that state.
+    degraded_provider.complete([Message(role="user", content="rank the at-risk customers")], [])
+    degraded = info_for(degraded_provider)
+
+    assert degraded["live"] is False, "a template is answering; the badge must not say live"
+    assert degraded["degraded"] is True
+    assert degraded["provider_model"] == "llama-3.3-70b-versatile"
+    assert "groq failed" in degraded["note"].lower()
+    assert "does not exist" in degraded["note"]
+    # The note is for a person: no JSON envelope, no exception class.
+    assert "{" not in degraded["note"] and "RuntimeError" not in degraded["note"]

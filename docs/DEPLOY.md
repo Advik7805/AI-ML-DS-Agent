@@ -110,8 +110,8 @@ panel and `GET /api/v1/integrations` show what is live and what is still mocked.
 
 | Service | Env vars | Free tier | What it unlocks |
 |---|---|---|---|
-| **Groq** | `GROQ_API_KEY`, `SAROS_LLM=groq` | free tier, per-minute limits | real reasoning in the hub agent |
-| **Gemini** | `GEMINI_API_KEY`, `SAROS_LLM=gemini` | free tier, per-day limits | same, second vendor |
+| **Groq** | `GROQ_API_KEY`, `SAROS_LLM=groq` | free tier, per-minute limits | real reasoning in the hub agent — defaults to `openai/gpt-oss-120b` |
+| **Gemini** | `GEMINI_API_KEY`, `SAROS_LLM=gemini` | free tier, per-day limits | same, second vendor — defaults to `gemini-3.8-flash` |
 | **Tavily** | `TAVILY_API_KEY`, `SAROS_TAVILY_LIVE=1` | **1,000 credits/month, students free** | `web_search`, `extract_url` |
 | **Jina Reader** | `JINA_API_KEY` *(optional)* | **~20 req/min with no key**; 500 RPM + 10M tokens with a free key | `render_url` — works with zero configuration |
 | **Firecrawl** | `FIRECRAWL_API_KEY`, `SAROS_FIRECRAWL_LIVE=1` | 500 credits **one-time** | `render_url` fallback, only if configured |
@@ -127,7 +127,11 @@ Suggested order, best value first:
 
 1. **Groq or Gemini.** Biggest visible change — the agent stops templating answers from tool
    output and starts actually reasoning. A missing key falls back to the mock provider rather
-   than throwing, so this is safe to experiment with.
+   than throwing, so this is safe to experiment with. Model IDs are pinned by the provider's own
+   candidate list (`openai/gpt-oss-120b`, `qwen/qwen3.6-27b`, `openai/gpt-oss-20b` for Groq;
+   `gemini-3.8-flash`, `gemini-3.5-flash`, `gemini-2.5-flash` for Gemini) precisely because
+   vendors retire them — `GROQ_MODEL` / `GEMINI_MODEL` override the first candidate without
+   touching code.
 2. **Tavily.** 1,000 credits a month with no card is enough for real development. Basic search
    is 1 credit; keep `SAROS_TAVILY_SEARCH_DEPTH=basic` — `advanced` doubles it.
 3. **Upstash.** Worth doing *before* you share the link publicly. Without it the rate limit is
@@ -180,6 +184,8 @@ Worth understanding before you debug a "why is this still mock?" question.
 | A body chip or file drop does nothing | The page never hydrated — same cause as above | Check the browser console for a blocked `/_next/hmr` request; run `scripts/browser-check.mjs` |
 | First request after idle takes ~60s | Render free tier spin-down | Normal. Add the `SAROS_API_URL` secret |
 | Agent answers look templated | `SAROS_LLM=mock` | Set a key and `SAROS_LLM=groq`/`gemini` |
+| An answer looks templated **and carries a one-line warning** | Degraded: the key is set but the provider failed (retired model ID, spent quota, vendor outage). The tool results in that answer are real; only the wording is the fallback policy. | `GET /api/v1/agent` reports `"degraded": true` and the readable reason. A retired model fixes itself by naming another in `GROQ_MODEL`/`GEMINI_MODEL` (the provider also rotates through its built-in candidate list); the next message retries regardless |
+| The badge says **mock** although a key is set | The key is empty/whitespace, or `SAROS_LLM` is pinned to `mock` | `GET /api/v1/agent` reports `provider_requested` as well as `provider`; a `429`-style quota failure shows as `degraded`, not `mock` |
 | Web search returns placeholders | Tavily key set but flag off | Also set `SAROS_TAVILY_LIVE=1` |
 | `429` responses | Rate limit | Expected; `X-RateLimit-*` headers say which backend counted |
 | A body is missing from the hub | It failed to import | `GET /health` → check `load_errors` |

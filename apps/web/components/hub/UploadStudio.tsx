@@ -15,6 +15,7 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 
+import { readAgentError } from "@/lib/agentError";
 import { readSessionId, useSessionId } from "@/lib/session";
 import type { DatasetCard, MetricsReport, ModuleManifest, Prediction } from "@/lib/types";
 
@@ -62,6 +63,9 @@ export function UploadStudio({ modules }: { modules: ModuleManifest[] }) {
   const [asking, setAsking] = useState(false);
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState<string | null>(null);
+  // Kept apart from `answer` on purpose: an error is not an answer, and the bug that produced a
+  // stack trace on this page was exactly the two being written into the same variable.
+  const [answerError, setAnswerError] = useState<string | null>(null);
   const [progress, setProgress] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -76,6 +80,7 @@ export function UploadStudio({ modules }: { modules: ModuleManifest[] }) {
     setRejection(null);
     setFailure(null);
     setAnswer(null);
+    setAnswerError(null);
   };
 
   const upload = useCallback(
@@ -128,6 +133,7 @@ export function UploadStudio({ modules }: { modules: ModuleManifest[] }) {
       if (!text.trim() || !analysis) return;
       setAsking(true);
       setAnswer(null);
+      setAnswerError(null);
       try {
         const res = await fetch("/api/v1/agent/chat", {
           method: "POST",
@@ -135,9 +141,18 @@ export function UploadStudio({ modules }: { modules: ModuleManifest[] }) {
           body: JSON.stringify({ message: text, session_id: session || readSessionId() }),
         });
         const payload = (await res.json()) as { answer?: string; error?: string | null; detail?: string };
-        setAnswer(payload.answer || payload.detail || payload.error || "No answer returned.");
+        // `payload.error` is deliberately absent from this chain. The line used to read
+        // `setAnswer(payload.answer || payload.detail || payload.error || ...)`, which handed the
+        // answer slot to a raw `RuntimeError: Groq 404: {...}` the moment a provider failed: the
+        // reader got a stack trace where the answer belonged. The error now goes through
+        // `readAgentError` and is rendered *under* the answer, as an explanation of what happened.
+        if (payload.answer) setAnswer(payload.answer);
+        else if (payload.detail) setAnswer(payload.detail);
+        else setAnswer("The agent did not return an answer for that question.");
+        if (payload.error) setAnswerError(readAgentError(payload.error));
       } catch (e) {
-        setAnswer(`Agent unreachable: ${e instanceof Error ? e.message : String(e)}`);
+        setAnswer("The agent is unreachable right now.");
+        setAnswerError(readAgentError(e instanceof Error ? e.message : String(e)));
       } finally {
         setAsking(false);
       }
@@ -160,6 +175,14 @@ export function UploadStudio({ modules }: { modules: ModuleManifest[] }) {
       `What should I check before trusting these results?`,
     ];
   }, [analysis, selected]);
+
+  // A document has no columns, and a table that matched nothing has nothing worth a panel. Both
+  // take the single-column layout: a 340px cell holding one sentence next to a dense results
+  // column is what made a correct upload read as a broken page.
+  const hasColumnMapping =
+    !!analysis &&
+    analysis.kind !== "document" &&
+    (analysis.columns_report.matched.length > 0 || analysis.columns_report.ignored.length > 0);
 
   return (
     <div className="glass rounded-2xl p-5">
@@ -253,6 +276,15 @@ export function UploadStudio({ modules }: { modules: ModuleManifest[] }) {
         )}
       </div>
 
+      {/* "With what file?" is a real question and the repo already answers it: `samples/` holds one
+          per body, generated through each body's own loader by scripts/make_samples.py, so the
+          columns in them cannot drift away from what the models expect. */}
+      <p className="mt-2 text-center text-[11px] leading-relaxed text-ink-faint">
+        No file of your own? Every body has one in <span className="font-mono">samples/</span> —
+        regenerate them any time with{" "}
+        <span className="font-mono">python scripts/make_samples.py</span>.
+      </p>
+
       {/* --- rejection: name the columns ------------------------------------ */}
       {rejection && (
         <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 p-4">
@@ -293,34 +325,44 @@ export function UploadStudio({ modules }: { modules: ModuleManifest[] }) {
             )}
           </div>
 
-          <div className="grid gap-3 lg:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
-            <div className="rounded-xl border border-line bg-void-2/60 p-4">
-              <div className="font-mono text-[10px] uppercase tracking-wider text-ink-faint">
-                column mapping
+          {!hasColumnMapping && (
+            <p className="text-[12px] leading-relaxed text-ink-dim">
+              {analysis.kind === "document"
+                ? "A document, not a table: chunked heading-wise and added to this session's knowledge overlay."
+                : "No columns in this file matched this body's schema, so there is no mapping to show."}
+            </p>
+          )}
+
+          <div
+            className={
+              hasColumnMapping
+                ? "grid gap-3 lg:grid-cols-[minmax(0,340px)_minmax(0,1fr)]"
+                : "space-y-3"
+            }
+          >
+            {hasColumnMapping && (
+              <div className="rounded-xl border border-line bg-void-2/60 p-4">
+                <div className="font-mono text-[10px] uppercase tracking-wider text-ink-faint">
+                  column mapping
+                </div>
+                <div className="mt-3 space-y-3">
+                  {analysis.columns_report.matched.length > 0 && (
+                    <ColumnList
+                      title={`used by the model (${analysis.columns_report.matched.length})`}
+                      columns={analysis.columns_report.matched}
+                      tone="#6ee7b7"
+                    />
+                  )}
+                  {analysis.columns_report.ignored.length > 0 && (
+                    <ColumnList
+                      title={`present but ignored (${analysis.columns_report.ignored.length})`}
+                      columns={analysis.columns_report.ignored}
+                      tone="var(--color-ink-faint)"
+                    />
+                  )}
+                </div>
               </div>
-              <div className="mt-3 space-y-3">
-                {analysis.columns_report.matched.length > 0 && (
-                  <ColumnList
-                    title={`used by the model (${analysis.columns_report.matched.length})`}
-                    columns={analysis.columns_report.matched}
-                    tone="#6ee7b7"
-                  />
-                )}
-                {analysis.columns_report.ignored.length > 0 && (
-                  <ColumnList
-                    title={`present but ignored (${analysis.columns_report.ignored.length})`}
-                    columns={analysis.columns_report.ignored}
-                    tone="var(--color-ink-faint)"
-                  />
-                )}
-                {analysis.columns_report.matched.length === 0 && analysis.kind === "document" && (
-                  <p className="text-[11.5px] text-ink-dim">
-                    A document, not a table: chunked heading-wise and added to this session&rsquo;s
-                    knowledge overlay.
-                  </p>
-                )}
-              </div>
-            </div>
+            )}
 
             <div className="space-y-3">
               {analysis.metrics && (
@@ -458,6 +500,11 @@ export function UploadStudio({ modules }: { modules: ModuleManifest[] }) {
               <div className="mt-3 whitespace-pre-wrap rounded-lg bg-white/[0.04] px-3.5 py-2.5 text-[12.5px] leading-relaxed text-ink ring-1 ring-white/10">
                 {answer}
               </div>
+            )}
+            {/* Below the answer, small and muted: an explanation of what went wrong, never a
+                substitute for the answer itself. */}
+            {answerError && (
+              <p className="mt-1.5 text-[11px] leading-relaxed text-ink-faint">{answerError}</p>
             )}
           </div>
 

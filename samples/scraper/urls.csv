@@ -1,0 +1,6 @@
+url,label,note
+https://example.com/,homepage,smallest possible page: baseline for the extractor
+https://example.com/pricing,pricing,"competitive price intel, Northwind Labs"
+https://example.com/about,about,company background for the knowledge overlay
+https://docs.example.com/returns,returns-policy,feeds the returns policy overlay
+https://docs.example.com/sla,sla,"availability commitments, group service management"

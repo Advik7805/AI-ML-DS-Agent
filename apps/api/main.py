@@ -571,27 +571,51 @@ def _coerce_history(raw: list[dict[str, str]]) -> list[Message]:
 
 @app.get("/api/v1/agent")
 def agent_info() -> dict[str, Any]:
+    """What is *actually* answering right now — three states, not two.
+
+    ``live: true`` while a templated answer is being served is a lie the badge tells on the
+    user's behalf, and it is the same class of lie as the old "Groq is live" badge next to a
+    mock chat. A provider that has degraded mid-conversation reports ``degraded: true`` with the
+    readable reason, so the UI can say "templated, and here is why" instead of claiming to be a
+    language model.
+    """
     if agent is None:
         raise HTTPException(status_code=503, detail="Agent not initialised.")
-    from core.agent.providers import resolve_provider_name
+    from core.agent.providers import readable_provider_error, resolve_provider_name
 
-    live = agent.provider.name != "mock"
-    return {
-        "provider": agent.provider.name,
-        "provider_requested": os.getenv("SAROS_LLM", "auto"),
-        # The badge reads this. `provider` is what is *actually* answering; `note` explains a
-        # mock honestly instead of letting a user read "mock" and assume the product is broken.
-        "live": live,
-        "max_iterations": agent.max_iterations,
-        "tools": [t.name for t in agent.registry.all_tools()],
-        "note": None
-        if live
-        else (
+    degraded = bool(getattr(agent.provider, "degraded", False))
+    live = agent.provider.name != "mock" and not degraded
+
+    if live:
+        note = None
+    elif degraded:
+        # The provider was reachable at some point and failed. Report what the vendor said, in
+        # the same wording the answer's notice uses, so the two never tell different stories.
+        reason = readable_provider_error(getattr(agent.provider, "degraded_reason", "") or "")
+        note = (
+            f"{agent.provider.name} failed, so answers are templated from real tool output until "
+            f"it recovers — {reason or 'see the trace for the raw error'}. The next message "
+            "retries the live provider automatically."
+        )
+    else:
+        note = (
             "Deterministic mock provider — no LLM key is configured, so answers are templated "
             "from real tool output. Set GROQ_API_KEY or GEMINI_API_KEY (SAROS_LLM is 'auto' by "
             f"default, currently '{resolve_provider_name()}') and the hub switches to a real "
             "model with no code change."
-        ),
+        )
+
+    return {
+        "provider": agent.provider.name,
+        "provider_requested": os.getenv("SAROS_LLM", "auto"),
+        # The badge reads `live`; `degraded` and `provider_model` are what let it tell a mock
+        # apart from a live provider that is currently failing.
+        "live": live,
+        "degraded": degraded,
+        "provider_model": getattr(agent.provider, "model", None),
+        "max_iterations": agent.max_iterations,
+        "tools": [t.name for t in agent.registry.all_tools()],
+        "note": note,
     }
 
 

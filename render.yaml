@@ -47,6 +47,11 @@ services:
       # Optional. Jina Reader's anonymous endpoint works with no key at ~20 req/min; a free
       # key (10M tokens, no card) raises that to 500 RPM.
       # Optional overrides. Sensible defaults exist for all of them.
+      # Unset = the provider's own candidate list, best first, rotated only when the vendor
+      # retires a model (Groq: openai/gpt-oss-120b -> qwen/qwen3.6-27b -> openai/gpt-oss-20b;
+      # Gemini: gemini-3.8-flash -> gemini-3.5-flash -> gemini-2.5-flash). A value here pins the
+      # *first* candidate tried and keeps the rest as fallbacks - which is why a retired default
+      # no longer reaches a user as a 404.
       - key: GROQ_MODEL
         sync: false
       - key: GEMINI_MODEL
